@@ -29,12 +29,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout this repository (the dispatched branch, no LFS)
+      - name: Checkout this repository (android branch, no LFS)
         id: checkout
         uses: actions/checkout@v4
         with:
           path: blender
-          ref: ${{ github.ref_name }}
+          ref: android
           lfs: false
 
       - name: Resolve required Git LFS files from the official Blender repository
@@ -48,15 +48,8 @@ jobs:
           # contains the Gradle skeleton (incl. gradle-wrapper.jar and the webp launcher icons).
           # tests/, release/windows, release/darwin and doc/ are not needed.
           INCLUDE="release/android/**,release/datafiles/**,assets/**,scripts/startup/**"
-          # Some release/android icons have no object on either server, so a strict fetch
-          # aborts the whole run over files the build can live without. Warn and continue;
-          # the verification step below is what actually gates the build.
-          git lfs fetch upstream-lfs --include "$INCLUDE" \
-            || echo "::warning::some LFS objects unavailable; continuing"
-          # Same reason as the fetch above: the pull exits non-zero over the objects that
-          # do not exist, which would abort before the build starts.
-          git lfs pull --include "$INCLUDE" \
-            || echo "::warning::some LFS objects unavailable; continuing"
+          git lfs fetch upstream-lfs --include "$INCLUDE"
+          git lfs pull --include "$INCLUDE"
           echo "LFS files resolved."
 
       - name: Verify resolved LFS files (gradle wrapper, launcher icons, startup.blend)
@@ -72,19 +65,12 @@ jobs:
           [ "$HASH" = "2c23278a62dc9f96ab11bee897d9f53e6479d6419135e4560ce822a6431df5e5" ] \
             || { echo "ERROR: gradle-wrapper.jar sha256 mismatch"; exit 1; }
           python3 -c "import zipfile; z=zipfile.ZipFile('$JAR'); assert 'org/gradle/wrapper/GradleWrapperMain.class' in z.namelist(); print('GradleWrapperMain.class present')"
-          # Launcher icons are referenced by the manifest and aapt2 rejects pointer stubs.
-          # The upstream icon set has objects that 404 on every server, so a stub here is
-          # reported rather than fatal: the Gradle project supplies its own mipmaps and the
-          # ones that do resolve are still checked.
+          # Launcher icons are referenced by the manifest; aapt2 fails on pointer stubs.
           for f in $(git ls-files 'release/android/app/src/main/res/mipmap-*/ic_launcher*.webp'); do
-            [ -e "$f" ] || { echo "::warning::$f absent, skipping"; continue; }
             MAGIC=$(head -c4 "$f" | od -An -tx1 | tr -d ' \n')
-            if [ "$MAGIC" = "52494646" ]; then
-              echo "OK $f"
-            else
-              echo "::warning::$f is a stub (magic=$MAGIC); relying on the Gradle mipmaps"
-            fi
+            [ "$MAGIC" = "52494646" ] || { echo "ERROR: $f is still a stub (magic=$MAGIC)"; exit 1; }
           done
+          echo "Launcher icons OK (RIFF/webp)."
           SIZE_SB=$(stat -c%s release/datafiles/startup.blend)
           echo "startup.blend size: $SIZE_SB (real content, not a dummy)"
           [ "$SIZE_SB" -gt 1024 ] || { echo "ERROR: startup.blend is empty/stub"; exit 1; }
@@ -226,6 +212,20 @@ jobs:
       # glue object and libblender.so shipped without ANativeActivity_onCreate
       # (crash on device: "undefined symbol"). ccache above is enough.
 
+      # Incremental builds. Keyed on the branch, not the commit: a per-sha key misses on
+      # every new commit and rebuilds all ~7600 targets, which is why builds here took an
+      # hour each. cmake/ninja re-run themselves when CMakeLists or headers change, and
+      # ccache below still filters what actually recompiles.
+      - name: Restore ninja build tree
+        id: cache-builddir
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: blender/build
+          key: builddir-android-${{ runner.os }}-${{ github.ref_name }}
+          restore-keys: |
+            builddir-android-${{ runner.os }}-
+
       - name: Configure CMake
         id: cmake-attempt1
         run: |
@@ -276,6 +276,14 @@ jobs:
             --exclude='gradle/app/build' \
             gradle
           echo "Staged size: $(du -sh ../gradle-stage.tar.zst | awk '{print $1}')"
+
+      - name: Save ninja build tree
+        if: always() && steps.cache-builddir.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: blender/build
+          key: builddir-android-${{ runner.os }}-${{ github.ref_name }}
 
       - name: Upload staged Gradle project
         if: steps.cmake-attempt1.outcome == 'success'
