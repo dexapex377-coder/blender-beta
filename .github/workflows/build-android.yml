@@ -253,7 +253,7 @@ jobs:
           cmake -S . -B build_host_tools_full -G Ninja -C "$FEATURES" \
             -DWITH_CROSSCOMPILED_TOOLS=OFF \
             -DWITH_HEADLESS=ON -DWITH_X11_XINPUT=OFF -DWITH_AUDASPACE=OFF \
-            -DWITH_COMPILER_CCACHE=ON \
+            -DWITH_COMPILER_CCACHE=ON -DWITH_JOLT=OFF \
             -DCMAKE_BUILD_RPATH="$PWD/lib/linux_x64/tbb/lib"
           cmake --build build_host_tools_full --target makesdna makesrna datatoc msgfmt shader_tool -j"$(nproc)"
           ls -la build_host_tools_full/bin/
@@ -261,6 +261,11 @@ jobs:
       # platform_android.cmake defaults BUILD_BASE to ../blender_build_android, which is
       # where build_apk.sh puts the harvested deps. This pipeline keeps them in
       # lib/android_arm64, so BUILD_BASE is pointed at the source dir.
+      #
+      # WITH_JOLT is off: 5.3 beta turns it on by default and expects a prebuilt Jolt
+      # tarball that projects.blender.org's lib-android_arm64 does not carry yet, which
+      # otherwise stops configure with 'Could not find a package configuration file
+      # provided by Jolt'. Physics is unrelated to the render and shortcut work here.
       - name: Configure CMake
         id: cmake-attempt1
         run: |
@@ -274,6 +279,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=install \
             -DBLENDER_ANDROID_CONFIG=full \
             -DBUILD_BASE=${{ github.workspace }}/blender \
+            -DWITH_JOLT=OFF \
             -C build_files/cmake/config/blender_release.cmake \
             -DWITH_TESTS=OFF \
             -DWITH_PYTHON_INSTALL=ON \
