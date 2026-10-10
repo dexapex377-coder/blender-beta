@@ -273,17 +273,13 @@ jobs:
           cmake --build build_host_tools_full --target makesdna makesrna datatoc msgfmt shader_tool -j"$(nproc)"
           ls -la build_host_tools_full/bin/
 
-      # bf_io_usd does not compile against the NDK r30 toolchain: USD's hashmap.h uses
-      # __gnu_cxx::__stl_next_prime, __gnu_cxx::equal_to and __gnu_cxx::allocator, which
-      # moved into std:: in newer libstdc++. The prebuilt USD headers are what breaks, so
-      # there is nothing to fix in this tree. USD is a file format importer and plays no
-      # part in the render, the shortcuts or the UI work this branch is for, so it and the
-      # other heavyweight importers are off for the beta test.
-      - name: Configure CMake
-        id: cmake-attempt1
-      # where build_apk.sh puts the harvested deps. This pipeline keeps them in
-      # lib/android_arm64, so BUILD_BASE is pointed at the source dir.
-      #
+      # bf_io_usd does not compile against the NDK r30 toolchain: the prebuilt USD headers
+      # use __gnu_cxx::__stl_next_prime, __gnu_cxx::equal_to and __gnu_cxx::allocator,
+      # which moved to std:: in the newer libstdc++. Nothing to fix in this tree. USD is a
+      # file format importer with no bearing on rendering, the shortcut panel or the UI
+      # work this branch exists to test, so it and the other heavyweight importers are off
+      # for the beta test. BUILD_BASE is pointed at the source dir because this pipeline
+      # keeps the harvested deps in lib/linux_arm64 rather than ../blender_build_android.
       - name: Configure CMake
         id: cmake-attempt1
         run: |
