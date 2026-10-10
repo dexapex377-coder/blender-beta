@@ -239,6 +239,25 @@ jobs:
           restore-keys: |
             builddir-android-${{ runner.os }}-
 
+      # 5.3 beta added platform_android.cmake, which refuses to configure until the host
+      # code generators exist. They are not in any prebuilt package -- makesdna, makesrna,
+      # datatoc, msgfmt and shader_tool are built from this tree for the host, because
+      # makesrna must carry exactly the same WITH_* flags as the target or the RNA it
+      # generates silently lacks its registration callbacks. The alpha port never needed
+      # this: platform_android.cmake did not exist yet.
+      - name: Build host code generators
+        run: |
+          set -o pipefail
+          cd blender
+          FEATURES=build_files/android/android_features_full.cmake
+          cmake -S . -B build_host_tools_full -G Ninja -C "$FEATURES" \
+            -DWITH_CROSSCOMPILED_TOOLS=OFF \
+            -DWITH_HEADLESS=ON -DWITH_X11_XINPUT=OFF -DWITH_AUDASPACE=OFF \
+            -DWITH_COMPILER_CCACHE=ON \
+            -DCMAKE_BUILD_RPATH="$PWD/lib/linux_x64/tbb/lib"
+          cmake --build build_host_tools_full --target makesdna makesrna datatoc msgfmt shader_tool -j"$(nproc)"
+          ls -la build_host_tools_full/bin/
+
       # platform_android.cmake defaults BUILD_BASE to ../blender_build_android, which is
       # where build_apk.sh puts the harvested deps. This pipeline keeps them in
       # lib/android_arm64, so BUILD_BASE is pointed at the source dir.
