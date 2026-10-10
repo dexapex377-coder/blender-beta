@@ -259,6 +259,33 @@ jobs:
       # makesrna must carry exactly the same WITH_* flags as the target or the RNA it
       # generates silently lacks its registration callbacks. The alpha port never needed
       # this: platform_android.cmake did not exist yet.
+      # USD's prebuilt headers target an older libstdc++: pxr/base/tf/hashmap.h uses
+      # __gnu_cxx::{hash,equal_to,allocator,hash_map} and __gnu_cxx::__stl_next_prime,
+      # none of which resolve under the NDK r30 toolchain ("no member named
+      # '__stl_next_prime' in namespace '__gnu_cxx'"). All of those moved to std::, so the
+      # mapping is one to one. Patching the header is the alternative to dropping USD, and
+      # the libs are already there.
+      - name: Patch USD headers for the NDK toolchain
+        run: |
+          set -o pipefail
+          H=blender/lib/linux_arm64/usd/include
+          if [ ! -d "$H" ]; then
+            echo "::warning::no USD headers, skipping"
+            exit 0
+          fi
+          echo "files referencing __gnu_cxx: $(grep -rl "__gnu_cxx" "$H" | wc -l)"
+          grep -rl "__gnu_cxx" "$H" | while read -r f; do
+            # hash_map -> unordered_map, and the rest are plain moves into std::.
+            sed -i -e 's/__gnu_cxx::hash_map/std::unordered_map/g' \
+                   -e 's/__gnu_cxx::hash</std::hash</g' \
+                   -e 's/__gnu_cxx::equal_to</std::equal_to</g' \
+                   -e 's/__gnu_cxx::allocator</std::allocator</g' \
+                   -e 's/__gnu_cxx::__stl_next_prime/__gnu_cxx::__detail::__next_prime/g' "$f"
+            # pxr still asks for hash_map by name; keep the old spelling as an alias.
+            sed -i '1i #include <unordered_map>\nnamespace __gnu_cxx { template<class K, class V, class H = std::hash<K>, class E = std::equal_to<K>, class A = std::allocator<V>> using hash_map = std::unordered_map<K, V, H, E, A>; template<class K, class V, class H = std::hash<K>, class E = std::equal_to<K>, class A = std::allocator<V>> using hash_multimap = std::unordered_multimap<K, V, H, E, A>; }' "$f"
+          done
+          echo "USD headers patched"
+
       - name: Build host code generators
         run: |
           set -o pipefail
