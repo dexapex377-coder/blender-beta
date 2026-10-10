@@ -208,7 +208,10 @@ if(WITH_PYTHON)
   set(PYTHON_VERSION 3.13)
   set(PYTHON_INCLUDE_DIR ${LIBDIR}/python/include/python3.13)
   set(PYTHON_INCLUDE_CONFIG_DIR ${LIBDIR}/python/include/python3.13)
-  set(PYTHON_LIBRARY ${LIBDIR}/python/lib/libpython3.13.so)
+  # The precompiled Android libs ship libpython3.13.a, not a .so. Pointing at the .so
+  # this file used to name leaves PYTHON_LIBRARY empty and ninja later reports
+  # "libandroid_arm64/python/lib/libpython3.13.so ... missing and no known rule".
+  set(PYTHON_LIBRARY ${LIBDIR}/python/lib/libpython3.13.a)
   set(PYTHON_LIBPATH ${LIBDIR}/python/lib)
   find_package(PythonLibsUnix REQUIRED)
   # numpy (cross-compiled into the target site-packages).

@@ -152,9 +152,9 @@ jobs:
             fi
           done
           [ -d blender/lib/linux_arm64 ] && ln -sfn linux_arm64 blender/lib/android_arm64
-          SZ_PY=$(stat -c%s blender/lib/linux_arm64/python/lib/libpython3.13.so 2>/dev/null || echo 0)
-          echo "libpython3.13.so: $SZ_PY bytes"
-          [ "$SZ_PY" -gt 1024 ] || { echo "ERROR: libpython3.13.so still a stub"; exit 1; }
+          SZ_PY=$(stat -c%s blender/lib/linux_arm64/python/lib/libpython3.13.a 2>/dev/null || echo 0)
+          echo "libpython3.13.a: $SZ_PY bytes"
+          [ "$SZ_PY" -gt 1024 ] || { echo "ERROR: libpython3.13.a still a stub"; exit 1; }
           ls -la blender/lib/
           SIZE_ARM=$(stat -c%s blender/lib/linux_arm64/zstd/lib/libzstd.a 2>/dev/null || echo 0)
           echo "ARM64 zstd.a: $SIZE_ARM bytes"
