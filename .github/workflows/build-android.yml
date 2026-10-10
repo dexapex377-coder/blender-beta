@@ -263,15 +263,14 @@ jobs:
         run: |
           set -o pipefail
           cd blender
-          FEATURES=build_files/android/android_features_full.cmake
-          cmake -S . -B build_host_tools_full -G Ninja -C "$FEATURES" \
+          FEATURES=build_files/android/android_features_lite.cmake
+          cmake -S . -B build_host_tools_lite -G Ninja -C "$FEATURES" \
             -DWITH_CROSSCOMPILED_TOOLS=OFF \
             -DWITH_HEADLESS=ON -DWITH_X11_XINPUT=OFF -DWITH_AUDASPACE=OFF \
-            -DWITH_COMPILER_CCACHE=ON -DWITH_USD=OFF -DWITH_MATERIALX=OFF \
-            -DWITH_ALEMBIC=OFF -DWITH_OPENVDB=OFF \
+            -DWITH_COMPILER_CCACHE=ON \
             -DCMAKE_BUILD_RPATH="$PWD/lib/linux_x64/tbb/lib"
-          cmake --build build_host_tools_full --target makesdna makesrna datatoc msgfmt shader_tool -j"$(nproc)"
-          ls -la build_host_tools_full/bin/
+          cmake --build build_host_tools_lite --target makesdna makesrna datatoc msgfmt shader_tool -j"$(nproc)"
+          ls -la build_host_tools_lite/bin/
 
       # bf_io_usd does not compile against the NDK r30 toolchain: the prebuilt USD headers
       # use __gnu_cxx::__stl_next_prime, __gnu_cxx::equal_to and __gnu_cxx::allocator,
@@ -291,8 +290,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=build_files/cmake/platform/platform_android_toolchain.cmake \
             -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
             -DCMAKE_INSTALL_PREFIX=install \
-            -DBLENDER_ANDROID_CONFIG=full \
-            -DWITH_USD=OFF -DWITH_MATERIALX=OFF -DWITH_ALEMBIC=OFF -DWITH_OPENVDB=OFF \
+            -DBLENDER_ANDROID_CONFIG=lite \
             -DBUILD_BASE=${{ github.workspace }}/blender \
             \
             -C build_files/cmake/config/blender_release.cmake \
