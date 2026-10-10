@@ -335,8 +335,14 @@ jobs:
             gradle
           echo "Staged size: $(du -sh ../gradle-stage.tar.zst | awk '{print $1}')"
 
+      # Only cache a tree whose configure succeeded. A cache written from a run that
+      # later failed carries the previous feature flags forward: with WITH_USD off the
+      # configure is clean, but a restored tree still carried rna_usd_gen.cc and the build
+      # died on 'no such file or directory: rna_usd_gen.cc' long after the flag had been
+      # changed. This is the stale-ninja-tree problem the original workflow warned about,
+      # narrowed to the case that actually bit: caching after a failure.
       - name: Save ninja build tree
-        if: always() && steps.cache-builddir.outputs.cache-hit != 'true'
+        if: success() && steps.cache-builddir.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
