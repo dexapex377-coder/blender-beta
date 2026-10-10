@@ -111,6 +111,12 @@ set(Eigen3_ROOT ${LIBDIR}/eigen)
 set(absl_ROOT ${LIBDIR}/abseil)
 set(Fribidi_ROOT ${LIBDIR}/fribidi)
 set(SSE2NEON_INCLUDE_DIR ${LIBDIR}/sse2neon/include)
+# Global, not directory-scoped: intern/cycles/util/simd.h includes <sse2neon.h> but
+# intern/cycles/CMakeLists.txt only flips the SSE feature flags, never adding the path.
+# include_directories() in the top-level CMakeLists does not reach a subproject that was
+# added before the call, which is how bf_editor_sculpt_paint and bf_intern_cycles ended up
+# with "sse2neon.h: file not found" while the header sits in the precompiled libs.
+include_directories(SYSTEM "${SSE2NEON_INCLUDE_DIR}")
 set(LibFFI_ROOT ${LIBDIR}/libffi)
 set(OpenSSL_ROOT ${LIBDIR}/openssl)
 set(OpenImageDenoise_ROOT ${LIBDIR}/openimagedenoise)
