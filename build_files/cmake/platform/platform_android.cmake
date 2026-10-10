@@ -73,6 +73,33 @@ file(GLOB _android_dep_prefixes "${LIBDIR}/*")
 set(CMAKE_STAGING_PREFIX "${LIBDIR}")
 list(APPEND CMAKE_PREFIX_PATH ${_android_dep_prefixes})
 
+# Derive the include and search paths from what is actually on disk rather than from
+# hand-written guesses. Every mismatch here had already cost a build: JPEG, Epoxy, Jolt and
+# sse2neon.h were each "missing" while sitting in the repo under a slightly different
+# layout than the line above assumed. A dependency that is present is found; one that is
+# absent is simply absent, which is also the right answer for Jolt on the older libs.
+foreach(_dep IN LISTS _android_dep_prefixes)
+  if(IS_DIRECTORY "${_dep}/include")
+    # -isystem rather than include_directories: the latter is directory-scoped and does not
+    # reach subprojects added earlier, which is why intern/cycles kept missing sse2neon.h.
+    string(APPEND CMAKE_CXX_FLAGS " -isystem ${_dep}/include")
+    string(APPEND CMAKE_C_FLAGS " -isystem ${_dep}/include")
+  endif()
+  if(IS_DIRECTORY "${_dep}/lib")
+    link_directories("${_dep}/lib")
+  endif()
+endforeach()
+
+# <Pkg>_ROOT from the directory name, so find_package(Jolt) looks in <LIBDIR>/jolt whether
+# or not the spelling matches what the caller used. Covers the packages with no hand
+# written line at all, which is where Jolt failed.
+foreach(_dep IN LISTS _android_dep_prefixes)
+  get_filename_component(_name "${_dep}" NAME)
+  string(TOUPPER "${_name}" _NAME)
+  set(${_NAME}_ROOT "${_dep}")
+  set(${_name}_ROOT "${_dep}")
+endforeach()
+
 # Per-package root hints for find_package().
 set(ZLIB_ROOT ${LIBDIR}/zlib)
 set(ZSTD_ROOT ${LIBDIR}/zstd)
@@ -110,11 +137,8 @@ set(pystring_ROOT ${LIBDIR}/pystring)
 set(Eigen3_ROOT ${LIBDIR}/eigen)
 set(absl_ROOT ${LIBDIR}/abseil)
 set(Fribidi_ROOT ${LIBDIR}/fribidi)
-# The header sits directly in sse2neon/, not in sse2neon/include/. Finding
-# Findsse2neon.cmake still succeeds because its PATH_SUFFIXES includes both, but the
-# -isystem added below pointed at a directory that does not exist, so
-# intern/cycles/util/simd.h failed with 'sse2neon.h: file not found' while the 408 KB
-# header sat one level up.
+# sse2neon.h sits directly in sse2neon/ rather than in sse2neon/include/; the
+# generic include loop above picks up both layouts.
 set(SSE2NEON_INCLUDE_DIR ${LIBDIR}/sse2neon)
 # As a compile option, not include_directories(): the latter only affects the current
 # directory and subdirectories added after the call, and intern/cycles/util/simd.h includes
