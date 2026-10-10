@@ -282,7 +282,7 @@ jobs:
                    -e 's/__gnu_cxx::allocator</std::allocator</g' \
                    -e 's/__gnu_cxx::__stl_next_prime/__gnu_cxx::__detail::__next_prime/g' "$f"
             # pxr still asks for hash_map by name; keep the old spelling as an alias.
-            sed -i '1i #include <unordered_map>\nnamespace __gnu_cxx { template<class K, class V, class H = std::hash<K>, class E = std::equal_to<K>, class A = std::allocator<V>> using hash_map = std::unordered_map<K, V, H, E, A>; template<class K, class V, class H = std::hash<K>, class E = std::equal_to<K>, class A = std::allocator<V>> using hash_multimap = std::unordered_multimap<K, V, H, E, A>; }' "$f"
+            sed -i '1i #include <unordered_map>\nnamespace __gnu_cxx { template<class... A> using hash_map = std::unordered_map<A...>; template<class... A> using hash_multimap = std::unordered_multimap<A...>; }' "$f"
           done
           echo "USD headers patched"
 
