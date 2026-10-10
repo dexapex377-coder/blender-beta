@@ -110,7 +110,12 @@ set(pystring_ROOT ${LIBDIR}/pystring)
 set(Eigen3_ROOT ${LIBDIR}/eigen)
 set(absl_ROOT ${LIBDIR}/abseil)
 set(Fribidi_ROOT ${LIBDIR}/fribidi)
-set(SSE2NEON_INCLUDE_DIR ${LIBDIR}/sse2neon/include)
+# The header sits directly in sse2neon/, not in sse2neon/include/. Finding
+# Findsse2neon.cmake still succeeds because its PATH_SUFFIXES includes both, but the
+# -isystem added below pointed at a directory that does not exist, so
+# intern/cycles/util/simd.h failed with 'sse2neon.h: file not found' while the 408 KB
+# header sat one level up.
+set(SSE2NEON_INCLUDE_DIR ${LIBDIR}/sse2neon)
 # As a compile option, not include_directories(): the latter only affects the current
 # directory and subdirectories added after the call, and intern/cycles/util/simd.h includes
 # <sse2neon.h> from a subproject that is added earlier. A flag on CMAKE_CXX_FLAGS reaches
