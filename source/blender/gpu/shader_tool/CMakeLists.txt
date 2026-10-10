@@ -84,10 +84,14 @@ if(WITH_GPU_SHADER_ASSERT)
   add_definitions(-DWITH_GPU_SHADER_ASSERT)
 endif()
 
-add_executable(shader_tool shader_tool.cc ${SRC})
-blender_target_include_dirs(shader_tool ${INC})
+# Imported as a host binary by platform_android.cmake; see the note in
+# source/blender/CMakeLists.txt.
+if(NOT TARGET shader_tool)
+  add_executable(shader_tool shader_tool.cc ${SRC})
+  blender_target_include_dirs(shader_tool ${INC})
 
-optimize_debug_target(shader_tool)
+  optimize_debug_target(shader_tool)
+endif()
 
 if(WITH_GTESTS)
   set(TEST_SRC

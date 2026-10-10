@@ -91,15 +91,19 @@ add_c_and_cxx_flags_custom_test(makesdna)
 # platform_android.cmake imports the host makesdna; see the note in
 # source/blender/CMakeLists.txt. Rebuilding it here would target Android and collide with
 # the imported target.
+# The include and link calls below only make sense for a target this build compiles;
+# on an imported one CMake rejects them with 'target_include_directories may only set
+# INTERFACE properties on IMPORTED targets'. The add_custom_command afterwards is fine,
+# it only reads $<TARGET_FILE:makesdna>.
 if(NOT TARGET makesdna)
   add_executable(makesdna ${SRC} ${SRC_DNA_INC})
   setup_platform_linker_flags(makesdna)
   setup_platform_linker_libs(makesdna)
+  blender_target_include_dirs(makesdna ${INC})
+  blender_target_include_dirs_sys(makesdna ${INC_SYS})
+  target_link_libraries(makesdna ${LIB})
+  target_link_libraries(makesdna PRIVATE bf::dependencies::pthreads)
 endif()
-blender_target_include_dirs(makesdna ${INC})
-blender_target_include_dirs_sys(makesdna ${INC_SYS})
-target_link_libraries(makesdna ${LIB})
-target_link_libraries(makesdna PRIVATE bf::dependencies::pthreads)
 
 # Output dna.cc
 add_custom_command(
