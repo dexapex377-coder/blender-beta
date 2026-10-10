@@ -277,12 +277,15 @@ jobs:
           grep -rl "__gnu_cxx" "$H" | while read -r f; do
             # hash_map -> unordered_map, and the rest are plain moves into std::.
             sed -i -e 's/__gnu_cxx::hash_map/std::unordered_map/g' \
+                   -e 's/__gnu_cxx::hash_set/std::unordered_set/g' \
+                   -e 's/__gnu_cxx::hash_multimap/std::unordered_multimap/g' \
+                   -e 's/__gnu_cxx::hash_multiset/std::unordered_multiset/g' \
                    -e 's/__gnu_cxx::hash</std::hash</g' \
                    -e 's/__gnu_cxx::equal_to</std::equal_to</g' \
                    -e 's/__gnu_cxx::allocator</std::allocator</g' \
-                   -e 's/__gnu_cxx::__stl_next_prime/__gnu_cxx::__detail::__next_prime/g' "$f"
-            # pxr still asks for hash_map by name; keep the old spelling as an alias.
-            sed -i '1i #include <unordered_map>\nnamespace __gnu_cxx { template<class... A> using hash_map = std::unordered_map<A...>; template<class... A> using hash_multimap = std::unordered_multimap<A...>; }' "$f"
+                   -e 's/__gnu_cxx::__stl_next_prime/std::__next_prime/g' "$f"
+            # pxr still asks for the hash_* names; keep the old spellings as aliases.
+            sed -i '1i #include <unordered_map>\n#include <unordered_set>\nnamespace __gnu_cxx { template<class... A> using hash_map = std::unordered_map<A...>; template<class... A> using hash_multimap = std::unordered_multimap<A...>; template<class... A> using hash_set = std::unordered_set<A...>; template<class... A> using hash_multiset = std::unordered_multiset<A...>; }' "$f"
           done
           echo "USD headers patched"
 
