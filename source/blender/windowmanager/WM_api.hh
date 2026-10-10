@@ -2616,6 +2616,16 @@ XrActionMapBinding *WM_xr_actionmap_binding_find(XrActionMapItem *ami, const cha
 /* Virtual keyboard (`wm_virtual_keyboard.cc`). */
 
 /**
+ * Operator type for wm_virtual_keyboard_toggle(), defined in wm_virtual_keyboard.cc and
+ * registered from wm_operators.cc.
+ *
+ * Without this prototype the append in wm_operators.cc does not compile: "use of
+ * undeclared identifier 'WM_OT_virtual_keyboard_toggle'". Upstream declares its operator
+ * types static in the file that registers them, but this one is defined elsewhere.
+ */
+void WM_OT_virtual_keyboard_toggle(wmOperatorType *ot);
+
+/**
  * True while the on-screen keyboard is up, in which case it is the keyboard: the platform one is
  * left alone, since two keyboards fighting over the same field is worse than either.
  */
