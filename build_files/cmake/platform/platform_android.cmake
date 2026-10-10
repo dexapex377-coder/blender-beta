@@ -92,9 +92,9 @@ foreach(_dep IN LISTS _android_dep_prefixes)
     string(APPEND CMAKE_CXX_FLAGS " -isystem ${_dep}/include")
     string(APPEND CMAKE_C_FLAGS " -isystem ${_dep}/include")
   endif()
-  if(IS_DIRECTORY "${_dep}/lib")
-    link_directories("${_dep}/lib")
-  endif()
+  # Deliberately no link_directories() here: adding every dependency's lib/ globally
+  # made FindThreads fail ('Could NOT find Threads'), since the lookup stops honouring the
+  # per-package roots. Libraries are still found, through the <Pkg>_ROOT values below.
 endforeach()
 
 # <Pkg>_ROOT from the directory name, so find_package(Jolt) looks in <LIBDIR>/jolt whether
