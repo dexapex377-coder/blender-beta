@@ -88,9 +88,14 @@ endif()
 
 add_c_and_cxx_flags_custom_test(makesdna)
 
-add_executable(makesdna ${SRC} ${SRC_DNA_INC})
-setup_platform_linker_flags(makesdna)
-setup_platform_linker_libs(makesdna)
+# platform_android.cmake imports the host makesdna; see the note in
+# source/blender/CMakeLists.txt. Rebuilding it here would target Android and collide with
+# the imported target.
+if(NOT TARGET makesdna)
+  add_executable(makesdna ${SRC} ${SRC_DNA_INC})
+  setup_platform_linker_flags(makesdna)
+  setup_platform_linker_libs(makesdna)
+endif()
 blender_target_include_dirs(makesdna ${INC})
 blender_target_include_dirs_sys(makesdna ${INC_SYS})
 target_link_libraries(makesdna ${LIB})
