@@ -1582,7 +1582,14 @@ endif()
 # - WIN32
 # - APPLE
 
-if(UNIX AND NOT APPLE)
+if(TARGET_ANDROID)
+  # platform_android.cmake sets LIBDIR to lib/android_arm64 and the per-package
+  # <Pkg>_ROOT hints that find_package needs. Without it the generic unix branch runs,
+  # derives lib/linux_arm64 from the processor name, finds nothing there and configure
+  # stops at "Could NOT find JPEG" before the compiler is ever invoked.
+  include(build_files/cmake/platform/platform_android.cmake)
+  include(build_files/cmake/platform/platform_unix.cmake)
+elseif(UNIX AND NOT APPLE)
   include(build_files/cmake/platform/platform_unix.cmake)
 elseif(WIN32)
   include(build_files/cmake/platform/platform_win32.cmake)
