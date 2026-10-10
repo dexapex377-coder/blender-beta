@@ -111,13 +111,6 @@ jobs:
           cd blender/lib/android_arm64
           git lfs install
           git lfs pull
-          # platform_unix.cmake derives LIBDIR from the processor name and looks for
-          # lib/linux_arm64, but the Android libs are published as lib/android_arm64. Without
-          # this alias WITH_LIBS_PRECOMPILED finds nothing and configure fails on
-          # "Could NOT find JPEG" and friends. Done here rather than in CMake so the
-          # platform file stays as upstream ships it.
-          cd ../..
-          [ -d lib/android_arm64 ] && ln -sfn android_arm64 lib/linux_arm64
 
       - name: Clone precompiled libs (Linux x64 — host_tools)
         if: steps.cache-libs-x64.outputs.cache-hit != 'true'
@@ -140,9 +133,15 @@ jobs:
           path: blender/lib/linux_x64
           key: libs-x64-${{ steps.libs-commit.outputs.x64 }}
 
+      # platform_unix.cmake derives LIBDIR from the processor name and looks for
+      # lib/linux_arm64, but the Android libs are published as lib/android_arm64. The
+      # alias has to be made here rather than next to the clone: that step is skipped when
+      # the libs come from cache, and configure then fails on "Could NOT find JPEG".
       - name: Verify libs
         run: |
           set -o pipefail
+          [ -d blender/lib/android_arm64 ] && ln -sfn android_arm64 blender/lib/linux_arm64
+          ls -la blender/lib/
           SIZE_ARM=$(stat -c%s blender/lib/android_arm64/zstd/lib/libzstd.a 2>/dev/null || echo 0)
           echo "ARM64 zstd.a: $SIZE_ARM bytes"
           SIZE_X64=$(stat -c%s blender/lib/linux_x64/zstd/lib/libzstd.a 2>/dev/null || echo 0)
