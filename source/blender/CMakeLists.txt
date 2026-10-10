@@ -110,8 +110,16 @@ set(SRC_DNA_OTHER_INC
   ${CMAKE_CURRENT_SOURCE_DIR}/makesdna/DNA_vec_defaults.h
 )
 
-add_subdirectory(datatoc)
-add_subdirectory(gpu/shader_tool)
+# platform_android.cmake imports these as IMPORTED targets pointing at the host
+# binaries built in a separate pass. add_subdirectory() would try to declare the same
+# target names for the Android toolchain and configure fails with "add_executable cannot
+# create target X because an imported target with the same name already exists".
+if(NOT TARGET datatoc)
+  add_subdirectory(datatoc)
+endif()
+if(NOT TARGET shader_tool)
+  add_subdirectory(gpu/shader_tool)
+endif()
 add_subdirectory(editors)
 add_subdirectory(windowmanager)
 add_subdirectory(animrig)

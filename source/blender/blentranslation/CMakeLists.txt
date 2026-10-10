@@ -60,6 +60,8 @@ endif()
 blender_add_lib(bf_blentranslation "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 add_library(bf::blentranslation ALIAS bf_blentranslation)
 
-if(WITH_INTERNATIONAL)
+# Imported by platform_android.cmake as a host binary; see the note next to
+# add_subdirectory(datatoc) in source/blender/CMakeLists.txt.
+if(WITH_INTERNATIONAL AND NOT TARGET msgfmt)
   add_subdirectory(msgfmt)
 endif()
