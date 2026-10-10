@@ -403,21 +403,27 @@ endif()
 # Build `makesrna` executable.
 add_c_and_cxx_flags_custom_test(makesrna)
 
-add_executable(makesrna ${SRC} ${SRC_RNA_INC} ${SRC_DNA_INC})
-setup_platform_linker_flags(makesrna)
-setup_platform_linker_libs(makesrna)
-blender_target_include_dirs(makesrna ${INC})
-blender_target_include_dirs_sys(makesrna ${INC_SYS})
+# Imported as a host binary by platform_android.cmake; see the note in
+# source/blender/CMakeLists.txt. The include and link calls below only apply to a target
+# this build compiles -- CMake rejects them on an IMPORTED one. The add_custom_command
+# that follows stays outside: it only reads $<TARGET_FILE:makesrna>.
+if(NOT TARGET makesrna)
+  add_executable(makesrna ${SRC} ${SRC_RNA_INC} ${SRC_DNA_INC})
+  setup_platform_linker_flags(makesrna)
+  setup_platform_linker_libs(makesrna)
+  blender_target_include_dirs(makesrna ${INC})
+  blender_target_include_dirs_sys(makesrna ${INC_SYS})
 
-target_link_libraries(makesrna PRIVATE bf_dna)
-target_link_libraries(makesrna PRIVATE bf::intern::atomic)
-target_link_libraries(makesrna PRIVATE bf::intern::guardedalloc)
-target_link_libraries(makesrna PRIVATE bf_dna_blenlib)
-target_link_libraries(makesrna PRIVATE bf_dna_defaults)
-target_link_libraries(makesrna PRIVATE bf::dependencies::optional::openvdb)
-target_link_libraries(makesrna PRIVATE bf::dependencies::optional::tbb)
-target_link_libraries(makesrna PRIVATE bf::dependencies::pthreads)
-target_link_libraries(makesrna PRIVATE bf::dependencies::fmt)
+  target_link_libraries(makesrna PRIVATE bf_dna)
+  target_link_libraries(makesrna PRIVATE bf::intern::atomic)
+  target_link_libraries(makesrna PRIVATE bf::intern::guardedalloc)
+  target_link_libraries(makesrna PRIVATE bf_dna_blenlib)
+  target_link_libraries(makesrna PRIVATE bf_dna_defaults)
+  target_link_libraries(makesrna PRIVATE bf::dependencies::optional::openvdb)
+  target_link_libraries(makesrna PRIVATE bf::dependencies::optional::tbb)
+  target_link_libraries(makesrna PRIVATE bf::dependencies::pthreads)
+  target_link_libraries(makesrna PRIVATE bf::dependencies::fmt)
+endif()
 
 # Output `rna_*_gen.cc`.
 # NOTE: (Linux only): with crashes try add this after COMMAND:
