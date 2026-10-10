@@ -148,8 +148,7 @@ foreach(_tool makesdna makesrna datatoc msgfmt shader_tool)
       "Build host tools first (see platform_android.cmake header).")
   endif()
   add_executable(${_tool} IMPORTED GLOBAL)
-    set_property(TARGET ${_tool} PROPERTY IMPORTED_LOCATION "${CROSSCOMPILE_TOOLDIR}/${_tool}")
-  endif()
+  set_property(TARGET ${_tool} PROPERTY IMPORTED_LOCATION "${CROSSCOMPILE_TOOLDIR}/${_tool}")
 endforeach()
 
 # Desktop-only or not-yet-ported features: keep off for Android.
