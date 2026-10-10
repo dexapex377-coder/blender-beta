@@ -45,6 +45,13 @@ endforeach()
 string(APPEND CMAKE_CXX_FLAGS
   " -include ${CMAKE_SOURCE_DIR}/build_files/android/compat/atomic_ref_compat.hpp")
 
+# glog falls back to stacktrace_generic-inl.h on ARM, which calls glibc's backtrace().
+# Bionic has no such function and glog ships no config_android.h.
+string(APPEND CMAKE_C_FLAGS
+  " -include ${CMAKE_SOURCE_DIR}/build_files/android/compat/glog_execinfo_compat.h")
+string(APPEND CMAKE_CXX_FLAGS
+  " -include ${CMAKE_SOURCE_DIR}/build_files/android/compat/glog_execinfo_compat.h")
+
 # The NDK ships older Vulkan headers; use our up-to-date Vulkan-Headers first.
 include_directories(BEFORE SYSTEM ${LIBDIR}/vulkan/include)
 set(VULKAN_INCLUDE_DIR ${LIBDIR}/vulkan/include)
