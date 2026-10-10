@@ -140,7 +140,21 @@ jobs:
       - name: Verify libs
         run: |
           set -o pipefail
+          # The libs are LFS-backed and the clone step is skipped on a cache hit, so the
+          # objects are not guaranteed to be present. platform_android.cmake hardcodes
+          # lib/android_arm64/python/lib/libpython3.13.so as PYTHON_LIBRARY, and ninja then
+          # stops with "missing and no known rule to make it" when that file is still a
+          # 130 byte pointer.
+          for d in linux_arm64 linux_x64; do
+            if [ -d "blender/lib/$d" ]; then
+              ( cd "blender/lib/$d" && git lfs install && git lfs pull ) || \
+                echo "::warning::lfs pull incomplete for $d"
+            fi
+          done
           [ -d blender/lib/linux_arm64 ] && ln -sfn linux_arm64 blender/lib/android_arm64
+          SZ_PY=$(stat -c%s blender/lib/linux_arm64/python/lib/libpython3.13.so 2>/dev/null || echo 0)
+          echo "libpython3.13.so: $SZ_PY bytes"
+          [ "$SZ_PY" -gt 1024 ] || { echo "ERROR: libpython3.13.so still a stub"; exit 1; }
           ls -la blender/lib/
           SIZE_ARM=$(stat -c%s blender/lib/linux_arm64/zstd/lib/libzstd.a 2>/dev/null || echo 0)
           echo "ARM64 zstd.a: $SIZE_ARM bytes"
