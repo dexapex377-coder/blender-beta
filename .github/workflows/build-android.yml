@@ -239,10 +239,9 @@ jobs:
           restore-keys: |
             builddir-android-${{ runner.os }}-
 
-      # find_package does not search LIBDIR; it searches CMAKE_PREFIX_PATH. The precompiled
-      # libs are laid out as <prefix>/<dep>/{lib,include}, which is the shape
-      # CMAKE_PREFIX_PATH expects, so both are passed below. With neither, configure dies on
-      # "Could NOT find JPEG" while the files sit in lib/android_arm64/jpeg/lib.
+      # platform_android.cmake defaults BUILD_BASE to ../blender_build_android, which is
+      # where build_apk.sh puts the harvested deps. This pipeline keeps them in
+      # lib/android_arm64, so BUILD_BASE is pointed at the source dir.
       - name: Configure CMake
         id: cmake-attempt1
         run: |
@@ -255,6 +254,7 @@ jobs:
             -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
             -DCMAKE_INSTALL_PREFIX=install \
             -DBLENDER_ANDROID_CONFIG=full \
+            -DBUILD_BASE=${{ github.workspace }}/blender \
             -C build_files/cmake/config/blender_release.cmake \
             -DWITH_TESTS=OFF \
             -DWITH_PYTHON_INSTALL=ON \
