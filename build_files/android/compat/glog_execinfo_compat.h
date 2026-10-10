@@ -16,9 +16,7 @@
  * Force-included the same way as atomic_ref_compat.hpp, from platform_android.cmake.
  */
 
-#ifndef __ANDROID__
-#error "This header is Android-only; include it from platform_android.cmake."
-#endif
+#if defined(__ANDROID__)
 
 /* glog includes <execinfo.h> in several places. Bionic ships the header without the
  * declarations, so these two keep the includes valid without pulling in glibc's. */
@@ -43,3 +41,5 @@ static inline void backtrace_symbols_fd(void *const *buffer, int size, int fd)
   (void)size;
   (void)fd;
 }
+
+#endif /* __ANDROID__ */

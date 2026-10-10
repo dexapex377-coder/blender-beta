@@ -47,8 +47,9 @@ string(APPEND CMAKE_CXX_FLAGS
 
 # glog falls back to stacktrace_generic-inl.h on ARM, which calls glibc's backtrace().
 # Bionic has no such function and glog ships no config_android.h.
-string(APPEND CMAKE_C_FLAGS
-  " -include ${CMAKE_SOURCE_DIR}/build_files/android/compat/glog_execinfo_compat.h")
+# C++ only. Adding it to CMAKE_C_FLAGS made FindThreads fail: its test program is C, the
+# header is guarded with #error outside Android, and a compile failure there is reported
+# as "Could NOT find Threads (missing: Threads_FOUND)". glog itself is C++.
 string(APPEND CMAKE_CXX_FLAGS
   " -include ${CMAKE_SOURCE_DIR}/build_files/android/compat/glog_execinfo_compat.h")
 
