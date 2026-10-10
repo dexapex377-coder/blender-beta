@@ -1613,7 +1613,11 @@ endif()
 # Enable SSE2NEON SIMD support if found.
 #
 if(SUPPORTS_NEON_BUILD AND SSE2NEON_FOUND)
-  include_directories(SYSTEM "${SSE2NEON_INCLUDE_DIRS}")
+  # Findsse2neon.cmake sets SSE2NEON_INCLUDE_DIR, singular; platform_android.cmake sets the
+  # same name. Reading the plural here left the variable empty inside quotes, so
+  # BLI_simd.hh failed with "sse2neon.h: file not found" even though the header ships in
+  # the precompiled libs.
+  include_directories(SYSTEM "${SSE2NEON_INCLUDE_DIR}")
   add_definitions(-DWITH_SSE2NEON)
 endif()
 
