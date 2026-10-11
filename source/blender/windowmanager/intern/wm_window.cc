@@ -99,12 +99,6 @@
 
 #include "UI_resources.hh"
 
-/* wm_virtual_keyboard.cc: both are defined there and used only from the hooks below. */
-extern void wm_virtual_keyboard_window_close(wmWindow *win);
-extern bool wm_virtual_keyboard_ghost_event(wmWindowManager *wm,
-                                             wmWindow *win,
-                                             const int type,
-                                             const void *customdata);
 
 #ifdef WITH_GHOST_WAYLAND
 #  include "wm_window_icon.hh"

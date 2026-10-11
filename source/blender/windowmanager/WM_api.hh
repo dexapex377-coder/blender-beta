@@ -2625,6 +2625,15 @@ XrActionMapBinding *WM_xr_actionmap_binding_find(XrActionMapItem *ami, const cha
  */
 void WM_OT_virtual_keyboard_toggle(wmOperatorType *ot);
 
+/* Hooks the window code calls into the virtual keyboard. Declared here rather than locally
+ * in wm_window.cc: at that point in the file neither wmWindow nor wmWindowManager is
+ * complete, and the local externs failed with 'unknown type name wmWindow'. */
+void wm_virtual_keyboard_window_close(wmWindow *win);
+bool wm_virtual_keyboard_ghost_event(wmWindowManager *wm,
+                                      wmWindow *win,
+                                      const int type,
+                                      const void *customdata);
+
 /**
  * True while the on-screen keyboard is up, in which case it is the keyboard: the platform one is
  * left alone, since two keyboards fighting over the same field is worse than either.
