@@ -335,6 +335,32 @@ jobs:
       # work this branch exists to test, so it and the other heavyweight importers are off
       # for the beta test. BUILD_BASE is pointed at the source dir because this pipeline
       # keeps the harvested deps in lib/android_arm64 rather than ../blender_build_android.
+      - name: Create missing operator data-files
+        run: |
+          set -o pipefail
+          # source/creator/CMakeLists.txt installs one .dat per ICON_GEOM_NAMES entry.
+          # beta lists ops.gpencil.carver but never ships the file, so install stops with
+          # 'file INSTALL cannot find .../release/datafiles/icons/ops.gpencil.carver.dat'.
+          # These hold operator geometry for the icon brushes; an empty one falls back to
+          # defaults, which is better than failing the whole build over a brush.
+          cd blender
+          python3 - << 'PYEOF'
+          import pathlib, re
+          t = pathlib.Path("source/blender/editors/datafiles/CMakeLists.txt").read_text()
+          m = re.search(r"ICON_GEOM_NAMES(.*?)# END ICON_GEOM_NAMES", t, re.S)
+          d = pathlib.Path("release/datafiles/icons")
+          missing = []
+          for line in m.group(1).splitlines():
+              n = line.strip()
+              if not n or n.startswith("#"):
+                  continue
+              f = d / (n + ".dat")
+              if not f.exists():
+                  f.write_bytes(b"")
+                  missing.append(f.name)
+          print("created %d placeholder(s): %s" % (len(missing), missing))
+          PYEOF
+
       - name: Build pthread/rt stub libs
         run: |
           set -o pipefail
