@@ -88,13 +88,13 @@ jobs:
       - name: Resolve precompiled libs commit IDs
         id: libs-commit
         run: |
-          echo "arm=$(git ls-remote https://projects.blender.org/blender/lib-linux_arm64.git HEAD | cut -f1)" >> $GITHUB_OUTPUT
+          echo "arm=$(git ls-remote https://projects.blender.org/blender/lib-android_arm64.git HEAD | cut -f1)" >> $GITHUB_OUTPUT
           echo "x64=$(git ls-remote https://projects.blender.org/blender/lib-linux_x64.git HEAD | cut -f1)" >> $GITHUB_OUTPUT
 
       - uses: actions/cache/restore@v4
         id: cache-libs-android
         with:
-          path: blender/lib/linux_arm64
+          path: blender/lib/android_arm64
           key: libs-android-${{ steps.libs-commit.outputs.arm }}
 
       - uses: actions/cache/restore@v4
@@ -107,8 +107,8 @@ jobs:
         if: steps.cache-libs-android.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
-          git clone --depth 1 https://projects.blender.org/blender/lib-linux_arm64.git blender/lib/linux_arm64
-          cd blender/lib/linux_arm64
+          git clone --depth 1 https://projects.blender.org/blender/lib-android_arm64.git blender/lib/android_arm64
+          cd blender/lib/android_arm64
           git lfs install
           git lfs pull
 
@@ -124,7 +124,7 @@ jobs:
       - uses: actions/cache/save@v4
         if: steps.cache-libs-android.outputs.cache-hit != 'true'
         with:
-          path: blender/lib/linux_arm64
+          path: blender/lib/android_arm64
           key: libs-android-${{ steps.libs-commit.outputs.arm }}
 
       - uses: actions/cache/save@v4
@@ -133,10 +133,8 @@ jobs:
           path: blender/lib/linux_x64
           key: libs-x64-${{ steps.libs-commit.outputs.x64 }}
 
-      # platform_android.cmake resolves LIBDIR to lib/android_arm64, while the precompiled
-      # ARM64 libs are published under lib-linux_arm64 and land in lib/linux_arm64. The
-      # alias has to be made here rather than next to the clone: that step is skipped when
-      # the libs come from cache, and configure then stops at "Android LIBDIR not found".
+      # LIBDIR resolves to lib/android_arm64, which is exactly where the clone puts them.
+      # No alias needed.
       - name: Verify libs
         run: |
           set -o pipefail
@@ -145,18 +143,17 @@ jobs:
           # lib/android_arm64/python/lib/libpython3.13.so as PYTHON_LIBRARY, and ninja then
           # stops with "missing and no known rule to make it" when that file is still a
           # 130 byte pointer.
-          for d in linux_arm64 linux_x64; do
+          for d in android_arm64 linux_x64; do
             if [ -d "blender/lib/$d" ]; then
               ( cd "blender/lib/$d" && git lfs install && git lfs pull ) || \
                 echo "::warning::lfs pull incomplete for $d"
             fi
           done
-          [ -d blender/lib/linux_arm64 ] && ln -sfn linux_arm64 blender/lib/android_arm64
-          SZ_PY=$(stat -c%s blender/lib/linux_arm64/python/lib/libpython3.13.a 2>/dev/null || echo 0)
+          SZ_PY=$(stat -c%s blender/lib/android_arm64/python/lib/libpython3.13.so 2>/dev/null || echo 0)
           echo "libpython3.13.a: $SZ_PY bytes"
           [ "$SZ_PY" -gt 1024 ] || { echo "ERROR: libpython3.13.a still a stub"; exit 1; }
           ls -la blender/lib/
-          SIZE_ARM=$(stat -c%s blender/lib/linux_arm64/zstd/lib/libzstd.a 2>/dev/null || echo 0)
+          SIZE_ARM=$(stat -c%s blender/lib/android_arm64/zstd/lib/libzstd.a 2>/dev/null || echo 0)
           echo "ARM64 zstd.a: $SIZE_ARM bytes"
           SIZE_X64=$(stat -c%s blender/lib/linux_x64/zstd/lib/libzstd.a 2>/dev/null || echo 0)
           echo "x64 zstd.a: $SIZE_X64 bytes"
@@ -274,7 +271,7 @@ jobs:
       - name: Patch USD headers for the NDK toolchain
         run: |
           set -o pipefail
-          H=blender/lib/linux_arm64/usd/include
+          H=blender/lib/android_arm64/usd/include
           if [ ! -d "$H" ]; then
             echo "::warning::no USD headers, skipping"
             exit 0
@@ -313,7 +310,7 @@ jobs:
       # file format importer with no bearing on rendering, the shortcut panel or the UI
       # work this branch exists to test, so it and the other heavyweight importers are off
       # for the beta test. BUILD_BASE is pointed at the source dir because this pipeline
-      # keeps the harvested deps in lib/linux_arm64 rather than ../blender_build_android.
+      # keeps the harvested deps in lib/android_arm64 rather than ../blender_build_android.
       - name: Configure CMake
         id: cmake-attempt1
         run: |
@@ -327,6 +324,11 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=install \
             -DBLENDER_ANDROID_CONFIG=full \
             -DBUILD_BASE=${{ github.workspace }}/blender \
+            # lib-android_arm64 has no jolt, ktx or opentimelineio. All three are optional
+            # file-format support, unrelated to rendering, the shortcuts or the UI. Jolt
+            # only exists in lib-linux_arm64, which is a glibc build and cannot be linked
+            # by the NDK toolchain at all.
+            -DWITH_JOLT=OFF -DWITH_KTX=OFF -DWITH_OPENTIMELINEIO=OFF \
             \
             -C build_files/cmake/config/blender_release.cmake \
             -DWITH_TESTS=OFF \
