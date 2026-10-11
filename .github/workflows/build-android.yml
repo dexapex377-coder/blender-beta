@@ -171,7 +171,7 @@ jobs:
           # from the linux tree keeps subdivision working instead of turning it off.
           if [ ! -f blender/lib/android_arm64/opensubdiv/include/opensubdiv/osd/glPatchTable.h ]; then
             echo "Adding missing opensubdiv GL headers"
-            python3 -c "import shutil; shutil.unpack_archive('blender/.deps/opensubdiv.zip', 'blender/lib')"
+            python3 -c "import shutil; shutil.unpack_archive('blender/.deps/opensubdiv.zip', 'blender/lib/android_arm64')"
           fi
           test -f blender/lib/android_arm64/opensubdiv/include/opensubdiv/osd/glPatchTable.h \
             || { echo "ERROR: opensubdiv headers still incomplete"; exit 1; }
