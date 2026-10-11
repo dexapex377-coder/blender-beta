@@ -333,7 +333,11 @@ static bool ensure_mmap_initialized()
 
   std::unique_lock lock(mmap_mutex);
   if (!initialized) {
-    struct sigaction newact = {{nullptr}}, oldact = {{nullptr}};
+    /* Zero the whole struct rather than {{nullptr}}: sa_handler is a function pointer,
+     * and bionic's sigaction declares the members in an order that makes the brace
+     * initialiser try to store a nullptr into an int. */
+    struct sigaction newact = {};
+    struct sigaction oldact = {};
 
     newact.sa_sigaction = sigbus_handler;
     newact.sa_flags = SA_SIGINFO;

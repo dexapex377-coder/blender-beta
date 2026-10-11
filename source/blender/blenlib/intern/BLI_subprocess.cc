@@ -8,6 +8,50 @@
 
 #include "BLI_subprocess.hh"
 
+#ifdef __ANDROID__
+/* Bionic implements neither POSIX shared memory nor unnamed semaphores. Declare the
+ * symbols so the class bodies below still compile; each call site checks the result and
+ * reports the failure through its existing error path, so nothing has to be #ifdef'd. */
+#  include <fcntl.h>
+#  include <sys/stat.h>
+#  include <errno.h>
+static inline int shm_open(const char *, int, mode_t)
+{
+  errno = ENOSYS;
+  return -1;
+}
+static inline int shm_unlink(const char *)
+{
+  errno = ENOSYS;
+  return -1;
+}
+static inline sem_t *sem_open(const char *, int, mode_t, unsigned int)
+{
+  errno = ENOSYS;
+  return SEM_FAILED;
+}
+static inline int sem_close(sem_t *)
+{
+  errno = ENOSYS;
+  return -1;
+}
+static inline int sem_unlink(const char *)
+{
+  errno = ENOSYS;
+  return -1;
+}
+static inline int sem_post(sem_t *)
+{
+  errno = ENOSYS;
+  return -1;
+}
+static inline int sem_wait(sem_t *)
+{
+  errno = ENOSYS;
+  return -1;
+}
+#endif
+
 #if BLI_SUBPROCESS_SUPPORT
 
 /* Based on https://github.com/jarikomppa/ipc (Unlicense) */
