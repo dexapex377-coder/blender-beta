@@ -442,11 +442,12 @@ jobs:
           # The staged project embeds machine-specific settings from the build job runner, and
           # Gradle intermediates that the `assemble` job must regenerate.
           rm -f local.properties
-          cd ..
+          # package.sh stages the payload (lib/, assets/), not the Gradle project itself:
+          # that is still the checkout's build_files/android/apk. Ship the two together.
           tar -I 'zstd -T0' -cf ../gradle-stage.tar.zst \
-            --exclude='gradle/**/.gradle' \
-            --exclude='gradle/app/build' \
-            gradle
+            --exclude='build_files/android/apk/.gradle' \
+            --exclude='build_files/android/apk/app/build' \
+            android_apk_stage_full build_files/android/apk
           echo "Staged size: $(du -sh ../gradle-stage.tar.zst | awk '{print $1}')"
 
       # Only cache a tree whose configure succeeded. A cache written from a run that
@@ -498,7 +499,7 @@ jobs:
           ls -la
           mkdir -p stage
           tar -I zstd -xf gradle-stage.tar.zst -C stage
-          chmod +x stage/gradle/gradlew
+          chmod +x stage/build_files/android/apk/gradlew
           echo "Staged layout:"
           ls stage/gradle
 
@@ -557,16 +558,19 @@ jobs:
       - name: Assemble APK
         run: |
           set -o pipefail
-          cd stage/gradle
+          # package.sh stages the payload next to the Gradle project, so point Gradle at
+          # the jniLibs/assets dirs the same way package.sh's staging expects.
+          cd stage/build_files/android/apk
           ./gradlew assembleRelease \
             -PblenderVersionName=5.2.0 \
             -PblenderVersionCode=5020000 \
-            -PblenderMinSdk=29 2>&1 | tee gradle.log
+            -PblenderMinSdk=29 \
+            -PblenderStageBase="$GITHUB_WORKSPACE/stage" 2>&1 | tee gradle.log
 
       - name: Find APK
         id: find-apk
         run: |
-          APK=$(find stage/gradle -name "app-release.apk" 2>/dev/null | head -1)
+          APK=$(find stage/build_files/android/apk -name "app-release.apk" 2>/dev/null | head -1)
           echo "apk_path=$APK"
           echo "apk_path=$APK" >> $GITHUB_OUTPUT
 
