@@ -631,6 +631,10 @@ add_bundled_libraries(hiprt/lib)
 # OpenSuse needs lutil, ArchLinux not, for now keep, can avoid by using --as-needed
 if(HAIKU)
   list(APPEND PLATFORM_LINKLIBS -lnetwork)
+elseif(TARGET_ANDROID)
+  # Bionic has no libutil, so asking for it fails the link with
+  # 'ld.lld: error: unable to find library -lutil'.
+  list(APPEND PLATFORM_LINKLIBS -lc -lm)
 else()
   list(APPEND PLATFORM_LINKLIBS -lutil -lc -lm)
 endif()
