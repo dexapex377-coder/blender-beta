@@ -111,5 +111,16 @@ if [ "$MODE" = "--native-only" ]; then
   exit 0
 fi
 
+if [ "$MODE" = "--stage-only" ]; then
+  # Stop after staging: $BUILD_BASE/android_apk_stage_$CONFIG holds the stripped native
+  # libraries and the runtime payload, which is what app/build.gradle declares as
+  # jniLibs.srcDirs / assets.srcDirs. Gradle then owns resource merging, Kotlin/Compose
+  # compilation and packaging. The full path also needs the Android SDK, which the
+  # native-only job does not have.
+  echo "=== [$CONFIG] staging for Gradle ==="
+  BLENDER_ANDROID_CONFIG="$CONFIG" BUILD="$BUILD" bash "$SCRIPT_DIR/apk/package.sh" --stage-only
+  exit 0
+fi
+
 echo "=== [$CONFIG] package APK ==="
 BLENDER_ANDROID_CONFIG="$CONFIG" BUILD="$BUILD" bash "$SCRIPT_DIR/apk/package.sh"

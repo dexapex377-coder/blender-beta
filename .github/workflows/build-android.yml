@@ -414,14 +414,21 @@ jobs:
         run: |
           set -o pipefail
           cd blender
-          cmake --build build --target install 2>&1 | tee build.log
-          cmake --build build --target gradle_stage 2>&1 | tee gradle_stage.log
+          # build_apk.sh is the upstream wrapper. It builds `blender` plus the dlopen'd glTF
+          # bridges and hands off to apk/package.sh, which collects libblender.so from
+          # build/lib. The CMake `gradle_stage` target is not used: it runs `install`, and
+          # this tree has no install rule for the blender target, so staging stopped with
+          # 'Gradle staging: Missing library install/5.3/../libblender.so'.
+          bash build_files/android/build_apk.sh full --stage-only 2>&1 | tee build.log
 
       - name: Package staged Gradle project
         if: steps.cmake-attempt1.outcome == 'success'
         run: |
           set -o pipefail
-          cd blender/build/gradle
+          # package.sh --stage-only writes here, not to build/gradle.
+          # package.sh derives the stage dir from BUILD_BASE, which this pipeline points at
+          # the source dir, so it lands beside the checkout rather than in a sibling dir.
+          cd blender/android_apk_stage_full
           # The staged project embeds machine-specific settings from the build job runner, and
           # Gradle intermediates that the `assemble` job must regenerate.
           rm -f local.properties
