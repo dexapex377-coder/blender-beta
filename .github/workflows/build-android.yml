@@ -385,8 +385,12 @@ jobs:
       # died on 'no such file or directory: rna_usd_gen.cc' long after the flag had been
       # changed. This is the stale-ninja-tree problem the original workflow warned about,
       # narrowed to the case that actually bit: caching after a failure.
+      # success(), not always(): a tree restored from a cache written by a run with a
+      # different generator fails configure outright with 'Does not match the generator
+      # used previously: Unix Makefiles', and a half-built tree carries its CMakeCache
+      # with it. Only cache a configure that completed cleanly.
       - name: Save ninja build tree
-        if: always() && steps.cache-builddir.outputs.cache-hit != 'true'
+        if: success() && steps.cache-builddir.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
