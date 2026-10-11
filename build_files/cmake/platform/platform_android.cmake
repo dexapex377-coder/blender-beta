@@ -362,3 +362,8 @@ if(WITH_CYCLES AND WITH_CYCLES_PATH_GUIDING)
     message(STATUS "OpenPGL not found, disabling WITH_CYCLES_PATH_GUIDING")
   endif()
 endif()
+
+# The Gradle targets (gradle_stage, gradle_assemble) live in this file, which nothing
+# includes in this tree. Without it the build finishes and then the workflow stops with
+# "ninja: error: unknown target 'gradle_stage'".
+include(${CMAKE_CURRENT_LIST_DIR}/platform_android_gradle.cmake)

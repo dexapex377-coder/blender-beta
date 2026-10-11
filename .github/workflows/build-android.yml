@@ -442,20 +442,6 @@ jobs:
       # different generator fails configure outright with 'Does not match the generator
       # used previously: Unix Makefiles', and a half-built tree carries its CMakeCache
       # with it. Only cache a configure that completed cleanly.
-      - name: Save ninja build tree
-        if: success() && steps.cache-builddir.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@v4
-        with:
-          path: blender/build
-          # Keyed on the commit that ran configure, not on the branch, and saved even when
-          # the build later fails. That gives an incremental next run -- worth far more here
-          # than the staleness it risks, because a tree saved by a failed build is still
-          # valid for everything that did compile; ninja recompiles what changed and cmake
-          # re-runs when a CMakeLists moved.
-          key: builddir-android-${{ runner.os }}-${{ github.sha }}
-          enableCrossOsArchive: false
-
       - name: Upload staged Gradle project
         if: steps.cmake-attempt1.outcome == 'success'
         uses: actions/upload-artifact@v4
