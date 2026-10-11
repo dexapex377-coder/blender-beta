@@ -414,12 +414,22 @@ jobs:
         run: |
           set -o pipefail
           cd blender
-          # build_apk.sh is the upstream wrapper. It builds `blender` plus the dlopen'd glTF
-          # bridges and hands off to apk/package.sh, which collects libblender.so from
-          # build/lib. The CMake `gradle_stage` target is not used: it runs `install`, and
-          # this tree has no install rule for the blender target, so staging stopped with
-          # 'Gradle staging: Missing library install/5.3/../libblender.so'.
-          bash build_files/android/build_apk.sh full --stage-only 2>&1 | tee build.log
+          # Build the native targets directly, then stage. build_apk.sh is not used: it
+          # reconfigures with its own BUILD_BASE (env.sh defaults to NDK 28), which wrote
+          # the .so somewhere package.sh was not looking. package.sh collects libblender.so
+          # from build/lib, which is where the configure above puts it.
+          ninja -C build blender bf_intern_meshopt_bridge bf_intern_draco_bridge 2>&1 | tee build.log
+          echo "=== libblender.so ==="
+          ls -l build/lib/libblender.so
+          # env.sh needs the SDK/NDK it reads the prebuilt libraries with, not the NDK 28
+          # it would default to.
+          export ANDROID_HOME="$HOME/android-sdk"
+          export ANDROID_NDK_VERSION="${{ steps.setup-ndk.outputs.ndk-full-version }}"
+          export ANDROID_API=31
+          # package.sh derives both the library dir and the stage dir from BUILD_BASE, so it
+          # has to match the -DBUILD_BASE the configure above was given.
+          export BUILD_BASE="${GITHUB_WORKSPACE}/blender"
+          BLENDER_ANDROID_CONFIG=full BUILD="$PWD/build" bash build_files/android/apk/package.sh --stage-only 2>&1 | tee stage.log
 
       - name: Package staged Gradle project
         if: steps.cmake-attempt1.outcome == 'success'
