@@ -6,6 +6,7 @@
  * \ingroup eevee
  */
 
+#include "CLG_log.h"
 #include "BLI_time.hh"
 #include "DNA_material_types.h"
 
@@ -18,6 +19,8 @@
 
 #include "eevee_instance.hh"
 #include "eevee_material.hh"
+
+static CLG_LogRef LOG = {"eevee.material"};
 
 namespace blender::eevee {
 
@@ -192,8 +195,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       const double deadline = BLI_time_now_seconds() + 30.0;
       while (GPU_pass_status(pass) == GPU_PASS_QUEUED) {
         if (BLI_time_now_seconds() >= deadline) {
-          CLOG_WARN(&LOG,
-                    "EEVEE material compilation timed out after 30s, falling back to default");
+          CLOG_ERROR(&LOG, "EEVEE material compilation timed out, falling back to default");
           matpass.gpumat = inst_.shaders.material_shader_get(
               default_mat, default_mat->nodetree, pipeline_type, geometry_type, false, nullptr);
           break;

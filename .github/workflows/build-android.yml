@@ -249,7 +249,13 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: blender/build
-          key: builddir-android-${{ runner.os }}-${{ github.ref_name }}
+          # Keyed on the commit that ran configure, not on the branch, and saved even when
+          # the build later fails. That gives an incremental next run -- worth far more here
+          # than the staleness it risks, because a tree saved by a failed build is still
+          # valid for everything that did compile; ninja recompiles what changed and cmake
+          # re-runs when a CMakeLists moved.
+          key: builddir-android-${{ runner.os }}-${{ github.sha }}
+          enableCrossOsArchive: false
           restore-keys: |
             builddir-android-${{ runner.os }}-
 
@@ -369,12 +375,18 @@ jobs:
       # changed. This is the stale-ninja-tree problem the original workflow warned about,
       # narrowed to the case that actually bit: caching after a failure.
       - name: Save ninja build tree
-        if: success() && steps.cache-builddir.outputs.cache-hit != 'true'
+        if: always() && steps.cache-builddir.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: blender/build
-          key: builddir-android-${{ runner.os }}-${{ github.ref_name }}
+          # Keyed on the commit that ran configure, not on the branch, and saved even when
+          # the build later fails. That gives an incremental next run -- worth far more here
+          # than the staleness it risks, because a tree saved by a failed build is still
+          # valid for everything that did compile; ninja recompiles what changed and cmake
+          # re-runs when a CMakeLists moved.
+          key: builddir-android-${{ runner.os }}-${{ github.sha }}
+          enableCrossOsArchive: false
 
       - name: Upload staged Gradle project
         if: steps.cmake-attempt1.outcome == 'success'
