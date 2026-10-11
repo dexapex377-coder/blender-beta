@@ -229,6 +229,14 @@ if(WITH_CODEC_FFMPEG)
   target_compile_definitions(bf_deps_optional_ffmpeg INTERFACE WITH_FFMPEG)
   target_include_directories(bf_deps_optional_ffmpeg SYSTEM INTERFACE ${FFMPEG_INCLUDE_DIRS})
   target_link_libraries(bf_deps_optional_ffmpeg INTERFACE ${FFMPEG_LIBRARIES})
+  if(TARGET_ANDROID)
+    # FFmpeg's android_camera input device is compiled into libavdevice, which leaves
+    # ACameraManager_openCamera and friends undefined. They live in the NDK, not in any
+    # dependency, so they have to be named after libavdevice or the static archive is
+    # scanned too early to satisfy it. Blender reads video through FFmpeg only for
+    # movie clips, so the device itself is of no use here.
+    target_link_libraries(bf_deps_optional_ffmpeg INTERFACE camera2ndk mediandk android)
+  endif()
   if(WITH_IMAGE_OPENJPEG)
     target_link_libraries(bf_deps_optional_ffmpeg INTERFACE ${OPENJPEG_LIBRARIES})
   endif()
