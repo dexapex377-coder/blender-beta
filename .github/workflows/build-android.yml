@@ -152,6 +152,14 @@ jobs:
           SZ_PY=$(stat -c%s blender/lib/android_arm64/python/lib/libpython3.13.so 2>/dev/null || echo 0)
           echo "libpython3.13.a: $SZ_PY bytes"
           [ "$SZ_PY" -gt 1024 ] || { echo "ERROR: libpython3.13.a still a stub"; exit 1; }
+          # Jolt is not in lib-android_arm64, so it travels in the tree.
+          if [ ! -d blender/lib/android_arm64/jolt/lib/cmake/Jolt ]; then
+            echo "Installing Jolt from .deps/jolt.zip"
+            python3 -c "import shutil; shutil.unpack_archive('blender/.deps/jolt.zip', 'blender/lib/android_arm64')"
+          fi
+          test -f blender/lib/android_arm64/jolt/lib/cmake/Jolt/JoltConfig.cmake \
+            || { echo "ERROR: Jolt cmake config missing"; exit 1; }
+          echo "Jolt: $(stat -c%s blender/lib/android_arm64/jolt/lib/libJolt.so) bytes"
           ls -la blender/lib/
           SIZE_ARM=$(stat -c%s blender/lib/android_arm64/zstd/lib/libzstd.a 2>/dev/null || echo 0)
           echo "ARM64 zstd.a: $SIZE_ARM bytes"
@@ -324,12 +332,6 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=install \
             -DBLENDER_ANDROID_CONFIG=full \
             -DBUILD_BASE=${{ github.workspace }}/blender \
-            # lib-android_arm64 has no jolt, ktx or opentimelineio. All three are optional
-            # file-format support, unrelated to rendering, the shortcuts or the UI. Jolt
-            # only exists in lib-linux_arm64, which is a glibc build and cannot be linked
-            # by the NDK toolchain at all.
-            -DWITH_JOLT=OFF -DWITH_KTX=OFF -DWITH_OPENTIMELINEIO=OFF \
-            \
             -C build_files/cmake/config/blender_release.cmake \
             -DWITH_TESTS=OFF \
             -DWITH_PYTHON_INSTALL=ON \
