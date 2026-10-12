@@ -480,10 +480,15 @@ jobs:
           # The staged project embeds machine-specific settings from the build job runner.
           rm -f "$SRC/android_apk_stage_full/local.properties"
           cd "$SRC"
+          # FFmpeg is rebuilt against this NDK, which makes its codec libraries shared
+          # (libaom.so and friends) rather than the static archives the prebuilt tree
+          # ships. libblender.so then carries DT_NEEDED entries for them, and the packaging
+          # job cannot copy what it never receives, so the APK shipped without them and the
+          # app died on 'dlopen failed: library libaom.so not found'. Ship them.
           tar -I 'zstd -T0' -cf "$GITHUB_WORKSPACE/gradle-stage.tar.zst" \
             --exclude='build_files/android/apk/.gradle' \
             --exclude='build_files/android/apk/app/build' \
-            android_apk_stage_full build_files/android/apk
+            android_apk_stage_full build_files/android/apk lib/android_arm64/ffmpeg
           echo "Staged size: $(du -sh "$GITHUB_WORKSPACE/gradle-stage.tar.zst" | awk '{print $1}')"
 
       # Only cache a tree whose configure succeeded. A cache written from a run that
