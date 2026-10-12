@@ -1,0 +1,138 @@
+name: Android APK Package
+
+on:
+  # Fires on a successful native build without `needs:`, so the two run as independent
+  # jobs and the APK can also be dispatched by hand against an older .so.
+  workflow_run:
+    workflows: ["Android Native Build"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      native_run:
+        description: 'Run id of build-native.yml to take the .so from (blank = latest)'
+        required: false
+        default: ''
+
+# Packaging only. libblender.so and the staged runtime payload come from the
+# gradle-stage artifact, so this job takes minutes rather than the hour a full Blender
+# rebuild costs. Dispatch it on its own whenever the native side is already green.
+
+jobs:
+  assemble:
+    # workflow_run fires for failures too; only package when the native side is green.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+  assemble:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download staged Gradle project
+        env:
+          # Left blank, download-artifact takes the most recent run that produced this
+          # artifact. Set native_run to repackage an older .so without rebuilding.
+          NATIVE_RUN: ${{ inputs.native_run }}
+        uses: actions/download-artifact@v4
+        with:
+          name: gradle-stage
+          run-id: ${{ env.NATIVE_RUN }}
+
+      - name: Extract staged Gradle project
+        run: |
+          set -o pipefail
+          # download-artifact@v4 unzips the artifact contents directly into $GITHUB_WORKSPACE
+          # (no subfolder for single artifacts), so the tarball lands in the workspace root.
+          ls -la
+          mkdir -p stage
+          tar -I zstd -xf gradle-stage.tar.zst -C stage
+          chmod +x stage/build_files/android/apk/gradlew
+          echo "Staged layout:"
+          ls stage/gradle
+
+      - name: Verify Gradle wrapper integrity in the staged project
+        run: |
+          set -o pipefail
+          JAR=stage/gradle/gradle/wrapper/gradle-wrapper.jar
+          SZ=$(stat -c%s "$JAR")
+          echo "gradle-wrapper.jar size: $SZ (expected 54213)"
+          [ "$SZ" = "54213" ] || { echo "ERROR: gradle-wrapper.jar is an LFS stub"; exit 1; }
+          python3 -c "import zipfile; z=zipfile.ZipFile('$JAR'); assert 'org/gradle/wrapper/GradleWrapperMain.class' in z.namelist(); print('GradleWrapperMain.class present')"
+          echo "Gradle wrapper OK"
+          echo "--- gradle-wrapper.properties ---"
+          cat stage/gradle/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Gradle Wrapper distributions
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/wrapper
+          # The distribution version is pinned in gradle-wrapper.properties (Gradle 9.4.1).
+          key: gradle-wrapper-${{ hashFiles('stage/gradle/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-wrapper-
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          # Keyed on the pinned Gradle + AGP configuration so incompatible dependency sets are
+          # never reused (exact key only, no restore-key fallback). AGP is pinned to 9.2.0 in
+          # build.gradle and the wrapper to Gradle 9.4.1.
+          key: gradle-caches-${{ hashFiles('stage/gradle/gradle/wrapper/gradle-wrapper.properties','stage/gradle/build.gradle','stage/gradle/settings.gradle','stage/gradle/gradle.properties','stage/gradle/app/build.gradle') }}
+
+      - name: Ensure Android SDK build platform is available
+        run: |
+          set -o pipefail
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          if [ -d "$ANDROID_HOME/platforms/android-36" ]; then
+            echo "platforms;android-36 present"
+          else
+            echo "platforms;android-36 missing — installing (licenses are pre-accepted on runners)"
+            SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            if [ -x "$SDKM" ]; then
+              yes | "$SDKM" "platforms;android-36"
+            else
+              echo "sdkmanager not found; letting AGP auto-download instead"
+            fi
+          fi
+
+      - name: Assemble APK
+        run: |
+          set -o pipefail
+          # package.sh stages the payload next to the Gradle project, so point Gradle at
+          # the jniLibs/assets dirs the same way package.sh's staging expects.
+          cd stage/build_files/android/apk
+          ./gradlew assembleRelease \
+            -PblenderVersionName=5.2.0 \
+            -PblenderVersionCode=5020000 \
+            -PblenderMinSdk=29 \
+            -PblenderStageBase="$GITHUB_WORKSPACE/stage" 2>&1 | tee gradle.log
+
+      - name: Find APK
+        id: find-apk
+        run: |
+          APK=$(find stage/build_files/android/apk -name "app-release.apk" 2>/dev/null | head -1)
+          echo "apk_path=$APK"
+          echo "apk_path=$APK" >> $GITHUB_OUTPUT
+
+      - name: Upload APK
+        if: steps.find-apk.outputs.apk_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-android-apk
+          path: ${{ steps.find-apk.outputs.apk_path }}
+
+      - name: Upload Gradle logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-logs
+          path: |
+            stage/gradle/gradle.log
+            gradle-stage.tar.zst
+          if-no-files-found: ignore
