@@ -35,11 +35,12 @@ endif()
 message(STATUS "Android config: ${BLENDER_ANDROID_CONFIG}")
 include(${CMAKE_SOURCE_DIR}/build_files/android/android_features_${BLENDER_ANDROID_CONFIG}.cmake)
 
-# pthread/rt are folded into bionic libc; empty stubs satisfy deps that still
-# emit -lpthread/-lrt (created by the deps builder in .stublibs).
-foreach(_lf CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
-  string(APPEND ${_lf} " -L${LIBDIR}/.stublibs")
-endforeach()
+# pthread/rt are folded into bionic libc. Do NOT add empty .stublibs for them: satisfying
+# -lpthread with a stub satisfies the linker but records DT_NEEDED libpthread.so, and the
+# device has no such library. At load time it fails with 'dlopen failed: library
+# libpthread.so not found: needed by libblender.so'. pthread_* symbols resolve from
+# libc.so, which is already linked; the flags just have to be off the command line.
+# (The link also emits -pthread/-lrt from Threads/rt; those must be stripped below.)
 
 # NDK libc++ lacks std::atomic_ref (C++20); force-include a polyfill.
 string(APPEND CMAKE_CXX_FLAGS

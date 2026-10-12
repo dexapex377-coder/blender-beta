@@ -361,24 +361,6 @@ jobs:
           print("created %d placeholder(s): %s" % (len(missing), missing))
           PYEOF
 
-      - name: Build pthread/rt stub libs
-        run: |
-          set -o pipefail
-          # Bionic folds pthread and librt into libc, but several dependencies still emit
-          # -lpthread/-lrt in their exported link interface. Blender's own deps builder
-          # drops empty stubs in lib/.stublibs to absorb those; lib-android_arm64 does not
-          # ship that directory, so without them the link of bin/blender stops with
-          # 'ld.lld: error: unable to find library -lpthread'.
-          mkdir -p blender/lib/android_arm64/.stublibs
-          NDKCC="$(ls -d "$ANDROID_NDK_ROOT"/toolchains/llvm/prebuilt/*/bin/clang 2>/dev/null | head -1)"
-          test -n "$NDKCC" || { echo "ERROR: NDK clang not found under $ANDROID_NDK_ROOT"; exit 1; }
-          printf 'int blender_stub_symbol_does_not_exist;\n' > /tmp/blender_stub.c
-          for l in pthread rt util; do
-            "$NDKCC" --target=aarch64-none-linux-android29 -shared -fPIC \
-              -o "blender/lib/android_arm64/.stublibs/lib$l.so" /tmp/blender_stub.c
-          done
-          ls -l blender/lib/android_arm64/.stublibs/
-
       - name: Configure CMake
         id: cmake-attempt1
         run: |

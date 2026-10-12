@@ -642,7 +642,10 @@ endif()
 find_package(Threads REQUIRED)
 # `FindThreads` documentation notes that this may be empty
 # with the system libraries provide threading functionality.
-if(CMAKE_THREAD_LIBS_INIT)
+if(CMAKE_THREAD_LIBS_INIT AND NOT TARGET_ANDROID)
+  # On Android, FindThreads reports -lpthread, but bionic has pthread inside libc. Naming
+  # it makes lld record DT_NEEDED libpthread.so, and the device has no such library, so
+  # dlopen fails with 'library libpthread.so not found: needed by libblender.so'.
   list(APPEND PLATFORM_LINKLIBS ${CMAKE_THREAD_LIBS_INIT})
   # used by other platforms
   set(PTHREADS_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
