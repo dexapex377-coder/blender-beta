@@ -61,6 +61,23 @@ jobs:
           ls stage
           ls stage/build_files/android/apk | head
 
+      - name: Resolve launcher icons through LFS
+        run: |
+          set -o pipefail
+          # The launcher PNGs are LFS pointers. They were smudged in the build job, but
+          # package.sh only copies the Gradle project, and a GitHub upload of pointers is
+          # not a smudge, so the artifact carries 129 byte files and AAPT rejects them with
+          # 'file failed to compile'. Pull them from this repository into the staged copy.
+          APK_DIR="$GITHUB_WORKSPACE/stage/build_files/android/apk"
+          git clone --depth 1 --branch main "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" lfs-src
+          cd lfs-src
+          git lfs install --local
+          git lfs pull --include="build_files/android/apk/app/src/main/res/**" \
+            || echo "::warning::some launcher objects unavailable"
+          cp -R build_files/android/apk/app/src/main/res/. "$APK_DIR/app/src/main/res/"
+          echo "Launcher icon sizes:"
+          find "$APK_DIR/app/src/main/res" -name 'ic_launcher*.png' -printf '%s %p\n' | head -4
+
       - name: Verify the staged Gradle project
         run: |
           set -o pipefail
@@ -76,6 +93,11 @@ jobs:
           done
           test -s stage/android_apk_stage_full/lib/arm64-v8a/libblender.so \
             || { echo "ERROR: staged payload has no libblender.so"; exit 1; }
+          # A 129 byte launcher icon is an LFS pointer AAPT will refuse; catch it here with a
+          # message that says so, instead of a wall of AAPT errors.
+          STUB=$(find stage/build_files/android/apk/app/src/main/res -name 'ic_launcher*.png' \
+            -size -1k 2>/dev/null | head -1)
+          [ -z "$STUB" ] || { echo "ERROR: $STUB is still an LFS stub"; exit 1; }
           echo "Gradle version pinned: $(sed -n 's/.*gradle-\([0-9.]*\)-bin.zip/\1/p' "$APK_DIR/gradle/wrapper/gradle-wrapper.properties" | head -1)"
           echo "Staged libs: $(ls stage/android_apk_stage_full/lib/arm64-v8a | wc -l)"
           echo "Staged project OK"
