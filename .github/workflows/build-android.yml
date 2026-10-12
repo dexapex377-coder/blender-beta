@@ -435,20 +435,21 @@ jobs:
         if: steps.cmake-attempt1.outcome == 'success'
         run: |
           set -o pipefail
-          # package.sh --stage-only writes here, not to build/gradle.
-          # package.sh derives the stage dir from BUILD_BASE, which this pipeline points at
-          # the source dir, so it lands beside the checkout rather than in a sibling dir.
-          cd blender/android_apk_stage_full
-          # The staged project embeds machine-specific settings from the build job runner, and
-          # Gradle intermediates that the `assemble` job must regenerate.
-          rm -f local.properties
-          # package.sh stages the payload (lib/, assets/), not the Gradle project itself:
-          # that is still the checkout's build_files/android/apk. Ship the two together.
-          tar -I 'zstd -T0' -cf ../gradle-stage.tar.zst \
+          # package.sh --stage-only stages the payload (lib/, assets/) next to the source
+          # dir, since BUILD_BASE points there; the Gradle project itself is still the
+          # checkout's build_files/android/apk. Ship both, since assembleRelease needs the
+          # project and the payload together to find jniLibs and assets.
+          SRC="$GITHUB_WORKSPACE/blender"
+          test -d "$SRC/android_apk_stage_full" \
+            || { echo "ERROR: stage missing; package.sh did not run"; exit 1; }
+          # The staged project embeds machine-specific settings from the build job runner.
+          rm -f "$SRC/android_apk_stage_full/local.properties"
+          cd "$SRC"
+          tar -I 'zstd -T0' -cf "$GITHUB_WORKSPACE/gradle-stage.tar.zst" \
             --exclude='build_files/android/apk/.gradle' \
             --exclude='build_files/android/apk/app/build' \
             android_apk_stage_full build_files/android/apk
-          echo "Staged size: $(du -sh ../gradle-stage.tar.zst | awk '{print $1}')"
+          echo "Staged size: $(du -sh "$GITHUB_WORKSPACE/gradle-stage.tar.zst" | awk '{print $1}')"
 
       # Only cache a tree whose configure succeeded. A cache written from a run that
       # later failed carries the previous feature flags forward: with WITH_USD off the
@@ -465,7 +466,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gradle-stage
-          path: blender/gradle-stage.tar.zst
+          path: gradle-stage.tar.zst
           retention-days: 7
           if-no-files-found: error
 
