@@ -23,9 +23,6 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
-  assemble:
-    runs-on: ubuntu-latest
-
     steps:
       - name: Download staged Gradle project
         env:
