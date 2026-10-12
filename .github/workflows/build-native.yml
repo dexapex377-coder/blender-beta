@@ -372,6 +372,48 @@ jobs:
           print("created %d placeholder(s): %s" % (len(missing), missing))
           PYEOF
 
+      # The prebuilt lib-android_arm64 ships an FFmpeg whose libavdevice pulls -lpthread onto
+      # the link line, and bionic has no libpthread.so: the link failed with "unable to find
+      # library -lpthread". It also carries the android_camera input device, whose ACamera*
+      # symbols had to be chased through the NDK. Rebuilding FFmpeg with the repo's own deps
+      # builder avoids both, and is what the reference port does on every run.
+      # FFmpeg plus its codec deps is ~7 minutes of the build. Cached separately so only the
+      # runs that change the source pay for it.
+      - name: Restore FFmpeg rebuild
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: blender/lib/android_arm64/ffmpeg
+          key: ffmpeg-ndk30-${{ steps.libs-commit.outputs.arm }}
+
+      - name: Rebuild FFmpeg for this toolchain
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          cd blender
+          export BUILD_BASE="$GITHUB_WORKSPACE/blender"
+          export LIBDIR="$BUILD_BASE/lib/android_arm64"
+          export ANDROID_NDK_ROOT="${{ steps.setup-ndk.outputs.ndk-path }}"
+          export ANDROID_NDK_VERSION="${{ steps.setup-ndk.outputs.ndk-full-version }}"
+          export ANDROID_API=31
+          if [ -f "$LIBDIR/ffmpeg/lib/libavcodec.so" ] && \
+             [ "$LIBDIR/ffmpeg/.rebuilt-for-ndk30" = 1 ]; then
+            echo "FFmpeg already rebuilt for this toolchain; skipping"
+            exit 0
+          fi
+          bash build_files/android/deps/build.sh \
+            openjpeg ogg vorbis theora opus lame aom x265 vpx x264
+          bash build_files/android/deps/build.sh ffmpeg
+          touch "$LIBDIR/ffmpeg/.rebuilt-for-ndk30"
+          ls -la "$LIBDIR/ffmpeg/lib/" | head -8
+
+      - name: Save FFmpeg rebuild
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: blender/lib/android_arm64/ffmpeg
+          key: ffmpeg-ndk30-${{ steps.libs-commit.outputs.arm }}
+
       - name: Configure CMake
         id: cmake-attempt1
         run: |
