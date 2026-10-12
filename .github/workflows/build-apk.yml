@@ -61,17 +61,24 @@ jobs:
           ls stage
           ls stage/build_files/android/apk | head
 
-      - name: Verify Gradle wrapper integrity in the staged project
+      - name: Verify the staged Gradle project
         run: |
           set -o pipefail
-          JAR=stage/build_files/android/apk/gradle/wrapper/gradle-wrapper.jar
-          SZ=$(stat -c%s "$JAR")
-          echo "gradle-wrapper.jar size: $SZ (expected 54213)"
-          [ "$SZ" = "54213" ] || { echo "ERROR: gradle-wrapper.jar is an LFS stub"; exit 1; }
-          python3 -c "import zipfile; z=zipfile.ZipFile('$JAR'); assert 'org/gradle/wrapper/GradleWrapperMain.class' in z.namelist(); print('GradleWrapperMain.class present')"
-          echo "Gradle wrapper OK"
-          echo "--- gradle-wrapper.properties ---"
-          cat stage/gradle/gradle/wrapper/gradle-wrapper.properties
+          # The wrapper JAR is a Git LFS object and never arrives in the artifact, so there
+          # is nothing to verify there; the distribution downloaded in the previous step is
+          # what actually builds the APK. Check the project instead: the build files have to
+          # be real, and the payload the stage refers to has to be there.
+          APK_DIR=stage/build_files/android/apk
+          for f in build.gradle settings.gradle gradle.properties app/build.gradle \
+                   gradle/wrapper/gradle-wrapper.properties; do
+            test -s "$APK_DIR/$f" \
+              || { echo "ERROR: missing or empty $APK_DIR/$f"; exit 1; }
+          done
+          test -s stage/android_apk_stage_full/lib/arm64-v8a/libblender.so \
+            || { echo "ERROR: staged payload has no libblender.so"; exit 1; }
+          echo "Gradle version pinned: $(sed -n 's/.*gradle-\([0-9.]*\)-bin.zip/\1/p' "$APK_DIR/gradle/wrapper/gradle-wrapper.properties" | head -1)"
+          echo "Staged libs: $(ls stage/android_apk_stage_full/lib/arm64-v8a | wc -l)"
+          echo "Staged project OK"
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
