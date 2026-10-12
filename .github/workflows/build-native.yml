@@ -202,7 +202,7 @@ jobs:
         id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r30-beta1
+          ndk-version: r30
           link-to-sdk: true
 
       - name: Verify NDK and Vulkan Headers
@@ -384,7 +384,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: blender/lib/android_arm64/ffmpeg
-          key: ffmpeg-ndk30-static-${{ steps.libs-commit.outputs.arm }}
+          key: ffmpeg-ndk30final-static-${{ steps.libs-commit.outputs.arm }}
 
       - name: Rebuild FFmpeg for this toolchain
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -412,7 +412,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: blender/lib/android_arm64/ffmpeg
-          key: ffmpeg-ndk30-static-${{ steps.libs-commit.outputs.arm }}
+          key: ffmpeg-ndk30final-static-${{ steps.libs-commit.outputs.arm }}
 
       - name: Configure CMake
         id: cmake-attempt1
