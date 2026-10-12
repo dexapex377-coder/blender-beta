@@ -102,6 +102,18 @@ jobs:
           echo "Staged libs: $(ls stage/android_apk_stage_full/lib/arm64-v8a | wc -l)"
           echo "Staged project OK"
 
+      # package.sh copies libc++_shared.so out of the NDK sysroot. Without this it falls
+      # back to env.sh's default NDK 28, whose libc++ does not export __hash_memory, and the
+      # APK carries a different STL than the one libblender.so was linked against -- the app
+      # then dies on 'cannot locate symbol _ZNSt6__ndk113__hash_memoryEPKvm'. It has to be
+      # the same r30 the native job builds with.
+      - name: Setup NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: 30.0.14904198
+          link-to-sdk: true
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -143,6 +155,8 @@ jobs:
           fi
 
       - name: Assemble APK
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           set -o pipefail
           # package.sh stages the payload next to the Gradle project, so point Gradle at
