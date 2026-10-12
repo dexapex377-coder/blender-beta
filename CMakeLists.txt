@@ -339,6 +339,15 @@ Enable building Blender against SDL for windowing rather than the native APIs"
 )
 mark_as_advanced(WITH_GHOST_SDL)
 
+# Android windowing backend (NativeActivity + Vulkan). The NDK toolchain sets ANDROID,
+# and platform_android.cmake turns this on there; without it GHOST builds with every
+# backend disabled, libblender.so exports no ANativeActivity_onCreate, and the APK dies
+# in NativeActivity.onCreate with 'undefined symbol: ANativeActivity_onCreate'.
+if(ANDROID)
+  option(WITH_GHOST_ANDROID "Enable building Blender against the Android native windowing APIs" ON)
+  mark_as_advanced(WITH_GHOST_ANDROID)
+endif()
+
 if(UNIX AND NOT (APPLE OR HAIKU))
   option(WITH_GHOST_X11 "Enable building Blender against X11 for windowing" ON)
   mark_as_advanced(WITH_GHOST_X11)

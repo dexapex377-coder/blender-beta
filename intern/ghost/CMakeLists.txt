@@ -159,6 +159,52 @@ elseif(WITH_GHOST_SDL)
   list(APPEND LIB
     bf::dependencies::optional::sdl
   )
+elseif(WITH_GHOST_ANDROID)
+  list(APPEND SRC
+    intern/GHOST_AndroidMain.cc
+    intern/GHOST_SystemAndroid.cc
+    intern/GHOST_SystemPathsAndroid.cc
+    intern/GHOST_WindowAndroid.cc
+
+    intern/GHOST_SystemAndroid.hh
+    intern/GHOST_SystemPathsAndroid.hh
+    intern/GHOST_WindowAndroid.hh
+  )
+  add_definitions(-DWITH_GHOST_ANDROID)
+
+  # NativeActivity glue ships with the NDK as source. android_native_app_glue.c is what
+  # defines ANativeActivity_onCreate -- the single symbol NativeActivity.onCreate dlsym()s
+  # out of libblender.so. Without compiling it in, the APK installs and then dies in
+  # NativeActivity.onCreate with
+  #   java.lang.UnsatisfiedLinkError: ... undefined symbol: ANativeActivity_onCreate
+  # which is exactly what this tree did before: every GHOST backend was OFF
+  # (SDL/X11/Wayland/DBUS) and no branch below matched, so only the backend-agnostic
+  # sources were compiled and GHOST_ContextNone.cc came up empty-handed.
+  if(NOT ANDROID_NDK)
+    set(ANDROID_NDK "${ANDROID_NDK_ROOT}")
+  endif()
+  if(NOT ANDROID_NDK)
+    message(FATAL_ERROR
+      "WITH_GHOST_ANDROID needs the NDK root for native_app_glue; neither ANDROID_NDK nor "
+      "ANDROID_NDK_ROOT is set.")
+  endif()
+  set(_ndk_glue_dir "${ANDROID_NDK}/sources/android/native_app_glue")
+  if(NOT EXISTS "${_ndk_glue_dir}/android_native_app_glue.c")
+    message(FATAL_ERROR
+      "NDK native_app_glue not found at ${_ndk_glue_dir}. The NDK still ships it as source; "
+      "NDK r18+ removed the Java half, not the C half.")
+  endif()
+  list(APPEND SRC
+    "${_ndk_glue_dir}/android_native_app_glue.c"
+  )
+  list(APPEND INC_SYS
+    "${_ndk_glue_dir}"
+  )
+  unset(_ndk_glue_dir)
+  list(APPEND LIB
+    android
+    log
+  )
 elseif(APPLE AND NOT WITH_GHOST_X11)
   list(APPEND SRC
     intern/GHOST_SystemCocoa.mm
