@@ -462,7 +462,15 @@ if(WIN32 AND NOT UNIX)
   target_include_directories(bf_deps_pthreads SYSTEM INTERFACE ${PTHREADS_INC})
 endif()
 if(DEFINED PTHREADS_LIBRARIES)
-  target_link_libraries(bf_deps_pthreads INTERFACE ${PTHREADS_LIBRARIES})
+  if(TARGET_ANDROID)
+    # FindThreads reports -lpthread, but bionic has pthread inside libc.so. Naming it fails
+    # the link with 'unable to find library -lpthread', and satisfying it with an empty stub
+    # instead records DT_NEEDED libpthread.so, which the device does not have either --
+    # dlopen then dies with 'library libpthread.so not found: needed by libblender.so'.
+    # Leaving this empty is correct: the pthread_* symbols resolve from libc.so.
+  else()
+    target_link_libraries(bf_deps_pthreads INTERFACE ${PTHREADS_LIBRARIES})
+  endif()
 endif()
 
 # -----------------------------------------------------------------------------
