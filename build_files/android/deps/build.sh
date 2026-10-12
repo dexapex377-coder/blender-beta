@@ -733,7 +733,7 @@ build_ffmpeg() {
       --ar="$ANDROID_LLVM_BIN/llvm-ar" --ranlib="$ANDROID_LLVM_BIN/llvm-ranlib" \
       --strip="$ANDROID_LLVM_BIN/llvm-strip" --nm="$ANDROID_LLVM_BIN/llvm-nm" \
       --sysroot="$ANDROID_SYSROOT" \
-      --enable-shared --disable-static --enable-pic --disable-programs --disable-doc \
+      --disable-shared --enable-static --enable-pic --disable-programs --disable-doc \
       --enable-gpl --enable-version3 \
       --enable-libvpx --enable-libx264 --enable-libx265 --enable-libvorbis \
       --enable-libtheora --enable-libopus --enable-libmp3lame \
