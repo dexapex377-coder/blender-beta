@@ -198,11 +198,18 @@ jobs:
           fi
           echo "Both libs OK"
 
+      # 'r30' resolves to 30.0.16248370, whose libc++_shared.so exports
+      # std::__ndk1::__hash_memory -- the symbol libblender.so needs from the prebuilt
+      # abseil/draco archives. r28c and r29 do not. build-apk.yml must set up the same
+      # 'r30', because package.sh copies libc++_shared.so out of the NDK sysroot and an
+      # env.sh default of NDK 28 would ship a libc++ without that symbol.
+      # Never pin the semver '30.0.14904198' here: that is r30-beta1 (a <preview>1</preview>
+      # entry) and setup-ndk 404s on it.
       - name: Setup NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: 30.0.14904198
+          ndk-version: r30
           link-to-sdk: true
 
       - name: Verify NDK and Vulkan Headers
@@ -262,7 +269,7 @@ jobs:
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2.24
         with:
-          key: ${{ runner.os }}-blender-android-ndk3014990
+          key: ${{ runner.os }}-blender-android-ndk30
           max-size: 10G
 
       # NOTE: no cache for blender/build. A restored ninja tree kept a stale
@@ -384,7 +391,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: blender/lib/android_arm64/ffmpeg
-          key: ffmpeg-ndk3014990-static-${{ steps.libs-commit.outputs.arm }}
+          key: ffmpeg-ndk30final-static-${{ steps.libs-commit.outputs.arm }}
 
       - name: Rebuild FFmpeg for this toolchain
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -412,7 +419,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: blender/lib/android_arm64/ffmpeg
-          key: ffmpeg-ndk3014990-static-${{ steps.libs-commit.outputs.arm }}
+          key: ffmpeg-ndk30final-static-${{ steps.libs-commit.outputs.arm }}
 
       - name: Configure CMake
         id: cmake-attempt1
@@ -456,15 +463,48 @@ jobs:
           ninja -C build blender bf_intern_meshopt_bridge bf_intern_draco_bridge 2>&1 | tee build.log
           echo "=== libblender.so ==="
           ls -l build/lib/libblender.so
-          # env.sh needs the SDK/NDK it reads the prebuilt libraries with, not the NDK 28
-          # it would default to.
-          export ANDROID_HOME="$HOME/android-sdk"
+          # package.sh copies libc++_shared.so out of the NDK sysroot, so the NDK it sees has to
+          # be the one this job compiled and linked against. env.sh resolves it as
+          #     ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION}"
+          # -- and the GitHub runner image already exports ANDROID_NDK_ROOT pointing at
+          # whichever NDK it ships with (27.3.13750724 on ubuntu-latest at the time of
+          # writing). That ${ANDROID_NDK_ROOT:-...} then wins over ANDROID_NDK_VERSION and
+          # the runner's libc++ lands in the APK. That is what produced the launch failure:
+          #   [blender-android] NDK   : /usr/local/lib/android/sdk/ndk/27.3.13750724
+          # r27d's libc++_shared.so does not export std::__ndk1::__hash_memory, which
+          # libblender.so references from the prebuilt abseil/draco archives, so every
+          # launch died at System.loadLibrary with
+          #   cannot locate symbol _ZNSt6__ndk113__hash_memoryEPKvm referenced by libblender.so
+          # Export ANDROID_NDK_ROOT explicitly rather than relying on ANDROID_NDK_VERSION.
+          NDK_ROOT="${{ steps.setup-ndk.outputs.ndk-path }}"
+          export ANDROID_NDK_ROOT="$NDK_ROOT"
+          export ANDROID_NDK_HOME="$NDK_ROOT"
           export ANDROID_NDK_VERSION="${{ steps.setup-ndk.outputs.ndk-full-version }}"
           export ANDROID_API=31
+          # ANDROID_HOME must contain the SDK build-tools and platforms package.sh looks
+          # for, and the runner's pre-set value is the one that actually has them.
+          export ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
+          # Fail here rather than silently staging the wrong STL.
+          test -s "$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" \
+            || { echo "ERROR: no sysroot libc++_shared.so under $ANDROID_NDK_ROOT"; exit 1; }
+          if ! readelf --dyn-syms -W \
+              "$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" \
+              | grep -q _ZNSt6__ndk113__hash_memoryEPKvm; then
+            echo "ERROR: $ANDROID_NDK_ROOT's libc++_shared.so does not export __ndk1::__hash_memory"
+            exit 1
+          fi
+          echo "staging with NDK: $ANDROID_NDK_ROOT (version $ANDROID_NDK_VERSION)"
           # package.sh derives both the library dir and the stage dir from BUILD_BASE, so it
           # has to match the -DBUILD_BASE the configure above was given.
           export BUILD_BASE="${GITHUB_WORKSPACE}/blender"
           BLENDER_ANDROID_CONFIG=full BUILD="$PWD/build" bash build_files/android/apk/package.sh --stage-only 2>&1 | tee stage.log
+          # The staged payload is what the APK job consumes, so verify the file that is
+          # actually going to ship rather than the NDK we meant to use.
+          STAGED="$BUILD_BASE/android_apk_stage_full/lib/arm64-v8a/libc++_shared.so"
+          test -s "$STAGED" || { echo "ERROR: staged payload has no libc++_shared.so"; exit 1; }
+          readelf --dyn-syms -W "$STAGED" | grep -q _ZNSt6__ndk113__hash_memoryEPKvm \
+            || { echo "ERROR: staged libc++_shared.so is missing __hash_memory -- wrong NDK"; exit 1; }
+          echo "staged libc++_shared.so OK"
 
       - name: Package staged Gradle project
         if: steps.cmake-attempt1.outcome == 'success'

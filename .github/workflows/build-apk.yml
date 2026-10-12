@@ -102,17 +102,83 @@ jobs:
           echo "Staged libs: $(ls stage/android_apk_stage_full/lib/arm64-v8a | wc -l)"
           echo "Staged project OK"
 
-      # package.sh copies libc++_shared.so out of the NDK sysroot. Without this it falls
-      # back to env.sh's default NDK 28, whose libc++ does not export __hash_memory, and the
-      # APK carries a different STL than the one libblender.so was linked against -- the app
-      # then dies on 'cannot locate symbol _ZNSt6__ndk113__hash_memoryEPKvm'. It has to be
-      # the same r30 the native job builds with.
+      # THIS STEP IS THE ACTUAL FIX for 'cannot locate symbol _ZNSt6__ndk113__hash_memoryEPKvm'.
+      #
+      # libblender.so has that undefined reference -- it comes from the prebuilt static
+      # archives, not from our sources:
+      #   $ llvm-nm --undefined-only lib/android_arm64/abseil/lib/libabsl_cord.a | grep hash
+      #   $ llvm-nm --undefined-only lib/android_arm64/draco/lib/libdraco.a  | grep hash
+      #   U _ZNSt6__ndk113__hash_memoryEPKvm      (both)
+      #
+      # ANDROID_STL is c++_shared (platform_android_toolchain.cmake), so it must be resolved
+      # by the libc++_shared.so that ships in the APK. package.sh:49 copies that file straight
+      # out of the NDK sysroot:
+      #   cp "$ANDROID_SYSROOT/usr/lib/aarch64-linux-android/libc++_shared.so" "$JNI/"
+      # With no NDK set up here it falls back to env.sh's default, 28.2.13676358, so the APK
+      # carries a *different* STL than the one libblender.so was linked against and dlopen
+      # fails at launch.
+      #
+      # Measured with `llvm-nm -D --defined-only` on each sysroot's aarch64 libc++_shared.so
+      # (dl.google.com/android/repository/android-ndk-<r>-linux.zip):
+      #   28.2.13676358  r28c        -- not exported
+      #   29.0.14206865  r29         -- not exported
+      #   30.0.14904198  r30-beta1   T _ZNSt6__ndk113__hash_memoryEPKvm
+      #   30.0.16248370  r30 final   T _ZNSt6__ndk113__hash_memoryEPKvm
+      # r30 is the release channel one, so this job and the native job must both say 'r30'.
+      #
+      # Do NOT pin the bare semver '30.0.14904198'. That is r30-beta1 (its repository2-3.xml
+      # entry carries <preview>1</preview>); nttld/setup-ndk@v1 will not resolve a preview
+      # revision from a plain semver and the job dies immediately with
+      # 'Attempting to download 30.0.14904198... Error: Unexpected HTTP response: 404'.
       - name: Setup NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: 30.0.14904198
+          ndk-version: r30
           link-to-sdk: true
+
+      # The build above only guarantees the native job *could* see r30. It does not guarantee
+      # the file that ended up in the staged payload is r30's: package.sh copies libc++_shared.so
+      # out of whatever $ANDROID_NDK_ROOT resolves to, and env.sh silently defaults that to NDK
+      # 28. Check what is actually going into the APK, and put the right one there if not.
+      - name: Verify (and fix) the staged libc++_shared.so
+        run: |
+          set -o pipefail
+          JNI=stage/android_apk_stage_full/lib/arm64-v8a
+          SYM=_ZNSt6__ndk113__hash_memoryEPKvm
+          SRC="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+          test -s "$SRC" || { echo "ERROR: r30 sysroot libc++_shared.so not found at $SRC"; exit 1; }
+          echo "--- staged ---"
+          test -s "$JNI/libc++_shared.so" || echo "WARNING: staged payload has no libc++_shared.so"
+          if test -s "$JNI/libc++_shared.so" && readelf --dyn-syms -W "$JNI/libc++_shared.so" | grep -q "$SYM"; then
+            echo "OK: staged libc++_shared.so already exports $SYM"
+          else
+            echo "staged libc++_shared.so is missing $SYM -- replacing it with the r30 one"
+            readelf --dyn-syms -W "$SRC" | grep -q "$SYM" \
+              || { echo "ERROR: even r30's libc++_shared.so does not export $SYM"; exit 1; }
+            cp -f "$SRC" "$JNI/libc++_shared.so"
+            readelf --dyn-syms -W "$JNI/libc++_shared.so" | grep -q "$SYM" \
+              || { echo "ERROR: replacement did not take"; exit 1; }
+            echo "OK: replaced"
+          fi
+          # Report, but do not fail on, any other libc++ (__ndk1) symbol libblender.so needs and
+          # the staged runtime does not export. This is the shape the launch crash takes, so it
+          # is worth seeing even when it is not fatal for the current source.
+          if command -v llvm-nm >/dev/null; then
+            NEEDED=$(llvm-nm -u -D "$JNI/libblender.so" 2>/dev/null \
+                      | awk '{print $NF}' | grep '^_ZNSt6__ndk1' | sort -u)
+            HAVE=$(llvm-nm -D --defined-only "$JNI/libc++_shared.so" 2>/dev/null \
+                     | awk '{print $NF}' | sort -u)
+            MISSING=$(comm -23 <(printf '%s\n' "$NEEDED") <(printf '%s\n' "$HAVE"))
+            if [ -n "$MISSING" ]; then
+              echo "::warning::libc++ symbols libblender.so needs but libc++_shared.so does not export:"
+              printf '%s\n' "$MISSING" | sed 's/^/::warning::  /'
+            else
+              echo "OK: every __ndk1 symbol libblender.so needs is exported by libc++_shared.so"
+            fi
+          else
+            echo "llvm-nm unavailable; skipping the full __ndk1 cross-check"
+          fi
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
