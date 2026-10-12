@@ -47,8 +47,11 @@ jobs:
           mkdir -p stage
           tar -I zstd -xf gradle-stage.tar.zst -C stage
           chmod +x stage/build_files/android/apk/gradlew
+          test -x stage/build_files/android/apk/gradlew \
+            || { echo "ERROR: no gradlew after extract"; exit 1; }
           echo "Staged layout:"
-          ls stage/gradle
+          ls stage
+          ls stage/build_files/android/apk | head
 
       - name: Verify Gradle wrapper integrity in the staged project
         run: |
