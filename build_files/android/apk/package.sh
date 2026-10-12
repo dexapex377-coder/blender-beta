@@ -71,6 +71,22 @@ if [ "${BLENDER_ANDROID_TURNIP:-0}" = "1" ] && [ -f "$TURNIP" ]; then
   echo "[apk] bundled Mesa Turnip driver + platform shims"
 fi
 
+# FFmpeg's own libraries link against the codec libraries it was configured with (libaom,
+# libvpx, libx264, libx265, libopus, libvorbis, theora, lame, openjpeg). Those live in the
+# per-dependency lib dirs under $LIBDIR, not in ffmpeg/lib, and dlopen of libblender.so
+# fails without them: 'library "libaom.so" not found: needed by libblender.so'. Copy the
+# shared ones next to libblender.so.
+for d in ffmpeg aom vpx x264 x265 opus vorbis theora lame openjpeg ogg zlib; do
+  [ -d "$LIBDIR/$d/lib" ] || continue
+  for so in "$LIBDIR/$d/lib/"*.so; do
+    [ -f "$so" ] || continue
+    base="$(basename "$so")"
+    case "$base" in *.so.*) continue ;; esac   # keep only the soname, not versioned copies
+    cp "$so" "$JNI/$base"
+  done
+done
+echo "[apk] bundled FFmpeg codec libraries"
+
 if [ -d "$LIBDIR/adrenotools/hooks" ]; then
   cp "$LIBDIR"/adrenotools/hooks/*.so "$JNI/"
   echo "[apk] bundled adrenotools hooks (Turnip support)"
