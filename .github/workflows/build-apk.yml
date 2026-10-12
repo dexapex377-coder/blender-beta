@@ -33,6 +33,10 @@ jobs:
         with:
           name: gradle-stage
           run-id: ${{ env.NATIVE_RUN }}
+          # Pulling an artifact from a different run than this one needs a token;
+          # without it the action only looks at the current run and reports
+          # 'Artifact not found' even though the artifact is there.
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract staged Gradle project
         run: |
