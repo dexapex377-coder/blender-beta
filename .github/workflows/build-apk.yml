@@ -46,9 +46,17 @@ jobs:
           ls -la
           mkdir -p stage
           tar -I zstd -xf gradle-stage.tar.zst -C stage
-          chmod +x stage/build_files/android/apk/gradlew
-          test -x stage/build_files/android/apk/gradlew \
-            || { echo "ERROR: no gradlew after extract"; exit 1; }
+          # gradlew is a generated wrapper script and is not tracked in git, so it never
+          # reaches the artifact. Recreate it from the Gradle distribution instead of
+          # depending on a file that is not there.
+          GRADLE_VERSION=$(sed -n 's/.*gradle-\([0-9.]*\)-bin.zip/\1/p' \
+            stage/build_files/android/apk/gradle/wrapper/gradle-wrapper.properties | head -1)
+          echo "Gradle version: $GRADLE_VERSION"
+          GRADLE_DIST="https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          curl -fsSL -o /tmp/gradle.zip "$GRADLE_DIST"
+          unzip -q /tmp/gradle.zip -d /opt
+          ln -sf "/opt/gradle-${GRADLE_VERSION}/bin/gradle" /usr/local/bin/gradle
+          gradle --version | head -4
           echo "Staged layout:"
           ls stage
           ls stage/build_files/android/apk | head
@@ -56,7 +64,7 @@ jobs:
       - name: Verify Gradle wrapper integrity in the staged project
         run: |
           set -o pipefail
-          JAR=stage/gradle/gradle/wrapper/gradle-wrapper.jar
+          JAR=stage/build_files/android/apk/gradle/wrapper/gradle-wrapper.jar
           SZ=$(stat -c%s "$JAR")
           echo "gradle-wrapper.jar size: $SZ (expected 54213)"
           [ "$SZ" = "54213" ] || { echo "ERROR: gradle-wrapper.jar is an LFS stub"; exit 1; }
@@ -76,7 +84,7 @@ jobs:
         with:
           path: ~/.gradle/wrapper
           # The distribution version is pinned in gradle-wrapper.properties (Gradle 9.4.1).
-          key: gradle-wrapper-${{ hashFiles('stage/gradle/gradle/wrapper/gradle-wrapper.properties') }}
+          key: gradle-wrapper-${{ hashFiles('stage/build_files/android/apk/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-wrapper-
 
@@ -87,7 +95,7 @@ jobs:
           # Keyed on the pinned Gradle + AGP configuration so incompatible dependency sets are
           # never reused (exact key only, no restore-key fallback). AGP is pinned to 9.2.0 in
           # build.gradle and the wrapper to Gradle 9.4.1.
-          key: gradle-caches-${{ hashFiles('stage/gradle/gradle/wrapper/gradle-wrapper.properties','stage/gradle/build.gradle','stage/gradle/settings.gradle','stage/gradle/gradle.properties','stage/gradle/app/build.gradle') }}
+          key: gradle-caches-${{ hashFiles('stage/build_files/android/apk/gradle/wrapper/gradle-wrapper.properties','stage/build_files/android/apk/build.gradle','stage/build_files/android/apk/settings.gradle','stage/build_files/android/apk/gradle.properties','stage/build_files/android/apk/app/build.gradle') }}
 
       - name: Ensure Android SDK build platform is available
         run: |
@@ -111,7 +119,7 @@ jobs:
           # package.sh stages the payload next to the Gradle project, so point Gradle at
           # the jniLibs/assets dirs the same way package.sh's staging expects.
           cd stage/build_files/android/apk
-          ./gradlew assembleRelease \
+          gradle assembleRelease \
             -PblenderVersionName=5.2.0 \
             -PblenderVersionCode=5020000 \
             -PblenderMinSdk=29 \
