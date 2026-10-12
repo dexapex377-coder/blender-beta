@@ -71,22 +71,6 @@ if [ "${BLENDER_ANDROID_TURNIP:-0}" = "1" ] && [ -f "$TURNIP" ]; then
   echo "[apk] bundled Mesa Turnip driver + platform shims"
 fi
 
-# FFmpeg's own libraries link against the codec libraries it was configured with (libaom,
-# libvpx, libx264, libx265, libopus, libvorbis, theora, lame, openjpeg). Those live in the
-# per-dependency lib dirs under $LIBDIR, not in ffmpeg/lib, and dlopen of libblender.so
-# fails without them: 'library "libaom.so" not found: needed by libblender.so'. Copy the
-# shared ones next to libblender.so.
-for d in ffmpeg aom vpx x264 x265 opus vorbis theora lame openjpeg ogg zlib; do
-  [ -d "$LIBDIR/$d/lib" ] || continue
-  for so in "$LIBDIR/$d/lib/"*.so; do
-    [ -f "$so" ] || continue
-    base="$(basename "$so")"
-    case "$base" in *.so.*) continue ;; esac   # keep only the soname, not versioned copies
-    cp "$so" "$JNI/$base"
-  done
-done
-echo "[apk] bundled FFmpeg codec libraries"
-
 if [ -d "$LIBDIR/adrenotools/hooks" ]; then
   cp "$LIBDIR"/adrenotools/hooks/*.so "$JNI/"
   echo "[apk] bundled adrenotools hooks (Turnip support)"
@@ -124,6 +108,11 @@ readelf_needed() {
 # Android requires unversioned sonames (libX.so, never libX.so.N).
 unversion() { echo "${1%%.so*}.so"; }
 searchdirs=$(ls -d "$LIBDIR"/*/lib 2>/dev/null)
+# Codec libraries can sit one level deeper (aom/lib, ffmpeg/lib) and some builds put them
+# under a versioned subdir. Include those too, otherwise the NEEDED walk cannot find
+# libaom.so and the APK ships without it.
+searchdirs="$searchdirs $(ls -d "$LIBDIR"/*/lib/*/ 2>/dev/null)"
+echo "[apk] resolving shared libraries across $(echo $searchdirs | wc -w) directories"
 
 # Assemble the runtime payload first. Python is optional in the bootstrap
 # profile; when enabled, its extension modules also seed dependency resolution
@@ -254,7 +243,8 @@ while [ "$changed" = 1 ]; do
       case "$base" in
         libc.so|libm.so|libdl.so|liblog.so|libandroid.so|libGLESv1_CM.so|\
         libGLESv2.so|libGLESv3.so|libEGL.so|libvulkan.so|libOpenSLES.so|\
-        libjnigraphics.so|libz.so) continue;;
+        libjnigraphics.so|libz.so|libcamera2ndk.so|libmediandk.so|libmedi.so|\
+        libaudio.so|libjnigraphics.so) continue;;
       esac
       for d in $searchdirs; do
         if [ -f "$d/$base" ]; then cp "$d/$base" "$JNI/$base"; changed=1; break; fi
