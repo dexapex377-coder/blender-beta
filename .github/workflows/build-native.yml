@@ -24,6 +24,17 @@ on:
 # (`projects.blender.org`), so we fetch the subset required for the Android build from there
 # using the official `git lfs` mechanism, then verify a few critical files by SHA-256.
 
+# ccache was reporting 7% hits: CCACHE_BASEDIR was unset, so every absolute path from the
+# runner went into the hash and a fresh runner missed on nearly every translation unit.
+# Normalising against the workspace makes hits survive between runs, and checking compiler
+# mtimes by content stops header rewrites from invalidating everything.
+env:
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_COMPRESS: 1
+  CCACHE_COMPRESSLEVEL: 6
+  CCACHE_COMPILERCHECK: content
+
 jobs:
   build:
     runs-on: ubuntu-latest
