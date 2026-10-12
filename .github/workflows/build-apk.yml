@@ -24,15 +24,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download staged Gradle project
+      # download-artifact@v4 scopes to the *current* run when run-id is empty, so a
+      # hand-dispatched packaging job finds nothing and dies with
+      # 'Unable to download artifact(s): Not Found' even though gradle-stage is sitting
+      # there from the native build minutes earlier. Resolve the id first.
+      - name: Resolve which native run to package
+        id: native
         env:
-          # Left blank, download-artifact takes the most recent run that produced this
-          # artifact. Set native_run to repackage an older .so without rebuilding.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NATIVE_RUN: ${{ inputs.native_run }}
+          EVENT: ${{ github.event_name }}
+          TRIGGERING_RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          set -o pipefail
+          RID="$NATIVE_RUN"
+          if [ -z "$RID" ] && [ "$EVENT" = "workflow_run" ]; then
+            RID="$TRIGGERING_RUN"
+          fi
+          if [ -z "$RID" ]; then
+            RID=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/build-native.yml/runs?status=success&per_page=1" \
+                    --jq '.workflow_runs[0].id')
+          fi
+          [ -n "$RID" ] || { echo "ERROR: no successful build-native.yml run to package"; exit 1; }
+          echo "Packaging native run $RID"
+          echo "run_id=$RID" >> "$GITHUB_OUTPUT"
+
+      - name: Download staged Gradle project
         uses: actions/download-artifact@v4
         with:
           name: gradle-stage
-          run-id: ${{ env.NATIVE_RUN }}
+          run-id: ${{ steps.native.outputs.run_id }}
           # Pulling an artifact from a different run than this one needs a token;
           # without it the action only looks at the current run and reports
           # 'Artifact not found' even though the artifact is there.
