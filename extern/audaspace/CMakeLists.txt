@@ -265,6 +265,10 @@ if(WIN32)
 		file(GLOB LIBRARY_DIRS ${LIBRARY_PATH}/*)
 		list(APPEND CMAKE_PREFIX_PATH ${LIBRARY_DIRS})
 	endif()
+elseif(TARGET_ANDROID)
+	# Bionic has no standalone libpthread.so, so naming it fails the link with
+	# 'unable to find library -lpthread'. pthread_* resolves from libc.so.
+	set(LIBRARIES ${CMAKE_DL_LIBS})
 else()
 	set(LIBRARIES ${CMAKE_DL_LIBS} -lpthread)
 endif()
