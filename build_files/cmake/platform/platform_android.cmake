@@ -33,6 +33,13 @@ if(NOT DEFINED BLENDER_ANDROID_CONFIG)
   endif()
 endif()
 message(STATUS "Android config: ${BLENDER_ANDROID_CONFIG}")
+# Every guard below, and in platform_unix.cmake / dependency_targets.cmake, tests
+# TARGET_ANDROID. Nothing in this tree ever set it, so all of them silently took the
+# non-Android branch: -lpthread stayed on the link line, and the link failed with
+# 'unable to find library -lpthread' (or, with the empty stub, shipped a DT_NEEDED
+# libpthread.so that the device cannot load). CMakeLists.txt reads this variable too.
+set(TARGET_ANDROID TRUE)
+
 include(${CMAKE_SOURCE_DIR}/build_files/android/android_features_${BLENDER_ANDROID_CONFIG}.cmake)
 
 # pthread/rt are folded into bionic libc. Do NOT add empty .stublibs for them: satisfying
