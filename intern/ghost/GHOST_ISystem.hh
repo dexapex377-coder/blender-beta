@@ -288,6 +288,13 @@ class GHOST_ISystem {
   virtual void useWindowFocus(const bool use_focus) = 0;
 
   /**
+   * Show/hide an on-screen keyboard, for platforms without a physical one.
+   * Default implementations are no-ops; only touch backends act on these.
+   */
+  virtual GHOST_TSuccess popupOnScreenKeyboard(GHOST_IWindow *window);
+  virtual GHOST_TSuccess hideOnScreenKeyboard(GHOST_IWindow *window);
+
+  /**
    * Focus and raise windows on mouse hover.
    */
   virtual void setAutoFocus(const bool auto_focus) = 0;

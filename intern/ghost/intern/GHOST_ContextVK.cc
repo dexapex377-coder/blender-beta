@@ -1773,6 +1773,10 @@ GHOST_TSuccess GHOST_ContextVK::initializeDrawingContext()
   const bool use_window_surface = (hwnd_ != nullptr);
 #elif defined(__APPLE__)
   const bool use_window_surface = (metal_layer_ != nullptr);
+#elif defined(__ANDROID__)
+  /* There is no platform_ enum member on Android: the surface comes from an
+   * ANativeWindow instead, so ask the handle we were given. */
+  const bool use_window_surface = (native_window_ != nullptr);
 #else /* UNIX/Linux */
   bool use_window_surface = false;
   switch (platform_) {
