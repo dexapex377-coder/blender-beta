@@ -456,20 +456,6 @@ jobs:
             echo "ERROR: OIDN .so still present (shared layout)"; exit 1
           fi
           echo "OIDN static OK."
-          # CMake found the prebuilt .so the first time it ran and cached the path in
-          # CMakeCache.txt. The restore-keys on the ninja tree bring that file back, and
-          # nothing in CMakeLists.txt changed, so cmake does not re-detect and the link
-          # keeps asking for a library that was just deleted:
-          #   ninja: error: '.../openimagedenoise/lib/libOpenImageDenoise.so',
-          #           needed by 'lib/libblender.so', missing and no known rule to make it
-          # Drop the cached entries so find_package runs again against the static .a.
-          # Scoped to those keys rather than deleting CMakeCache.txt: a full re-detect
-          # can change flags and cost the whole tree its ccache hits.
-          if [ -f build/CMakeCache.txt ]; then
-            grep -icE '^(OPENIMAGEDENOISE|oidn)' build/CMakeCache.txt | sed 's/^/stale OIDN cache entries: /'
-            sed -i -E '/^(OPENIMAGEDENOISE|oidn)[A-Za-z_]*[:=]/d' build/CMakeCache.txt
-            echo "OIDN cache entries dropped; find_package will re-detect the static .a"
-          fi
 
       - name: Configure CMake
         id: cmake-attempt1
@@ -491,6 +477,8 @@ jobs:
           # libtbbmalloc.so and libtbbmalloc_proxy.so.
           cmake -B build \
             -S . \
+            -U "OPENIMAGEDENOISE.*" \
+            -U "oidn.*" \
             -DTARGET_ANDROID=ON \
             -DCMAKE_TOOLCHAIN_FILE=build_files/cmake/platform/platform_android_toolchain.cmake \
             -DANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }} \
