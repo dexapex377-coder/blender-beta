@@ -425,6 +425,31 @@ jobs:
           path: blender/lib/android_arm64/ffmpeg
           key: ffmpeg-ndk30final-static-${{ steps.libs-commit.outputs.arm }}
 
+      # The prebuilt OIDN in lib/android_arm64 is a *shared* library, and it is the wrong
+      # one for this tree: it carries no symbols libblender.so can bind against, so
+      # the denoiser silently does nothing at runtime. Compiling it does not by itself
+      # mean it works -- the static build below is what actually links. ISPC is not
+      # cross-compiled (it runs on the host and emits target code), so the CPU device's
+      # kernels exist only because the host tool is built here; without it OIDN builds
+      # with no CPU device and openimagedenoise_supported() is true for a device that
+      # cannot denoise anything. Replace the prebuilt rather than adding to it: both
+      # layouts cannot coexist, and package.sh asserts there is no .so at this path.
+      - name: Build OIDN static (denoiser linked into libblender.so)
+        run: |
+          set -o pipefail
+          cd blender
+          LIBDIR="$GITHUB_WORKSPACE/blender_build_android/lib/android_arm64"
+          echo "=== Removing prebuilt SHARED OIDN (replaced by static .a) ==="
+          rm -rf "$LIBDIR/openimagedenoise"
+          echo "=== Building ISPC (host tool) + OIDN static ==="
+          bash build_files/android/deps/build.sh ispc oidn
+          echo "=== Validating OIDN static output ==="
+          ls "$LIBDIR/openimagedenoise/lib/"*.a || { echo "ERROR: no OIDN .a produced"; exit 1; }
+          if ls "$LIBDIR/openimagedenoise/lib/"*.so 2>/dev/null; then
+            echo "ERROR: OIDN .so still present (shared layout)"; exit 1
+          fi
+          echo "OIDN static OK."
+
       - name: Configure CMake
         id: cmake-attempt1
         run: |
