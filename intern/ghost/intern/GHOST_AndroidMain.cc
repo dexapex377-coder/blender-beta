@@ -12,6 +12,8 @@
 #include "GHOST_ISystem.hh"
 #include "GHOST_SystemAndroid.hh"
 
+#include "BLI_threads.hh"
+
 #include <atomic>
 #include <android/log.h>
 #include <android_native_app_glue.h>
@@ -93,24 +95,34 @@ static GHOST_SystemAndroid *android_system()
 static std::vector<std::string> ghost_android_read_launch_args(android_app *app)
 {
   std::vector<std::string> args;
-  if (app == nullptr || app->activity == nullptr || app->activity->internalDataPath == nullptr) {
+  if (app == nullptr || app->activity == nullptr) {
     return args;
   }
-  const std::string path = std::string(app->activity->internalDataPath) + "/blender_args.txt";
-  FILE *file = fopen(path.c_str(), "r");
-  if (file == nullptr) {
-    return args;
+  /* Internal first, then external. The external path lives on /sdcard and lets
+   * us inject launch tweaks (e.g. --debug-value for Eevee debug views) without
+   * root or a debuggable build: just write blender_args.txt there and restart. */
+  const char *data_paths[] = {app->activity->internalDataPath, app->activity->externalDataPath};
+  for (const char *data_path : data_paths) {
+    if (data_path == nullptr) {
+      continue;
+    }
+    const std::string path = std::string(data_path) + "/blender_args.txt";
+    FILE *file = fopen(path.c_str(), "r");
+    if (file == nullptr) {
+      continue;
+    }
+    char token[512];
+    while (fscanf(file, "%511s", token) == 1) {
+      args.push_back(token);
+    }
+    fclose(file);
+    __android_log_print(ANDROID_LOG_INFO,
+                        "blender",
+                        "[BlenderAndroid] %zu launch argument(s) from %s",
+                        args.size(),
+                        path.c_str());
+    break;
   }
-  char token[512];
-  while (fscanf(file, "%511s", token) == 1) {
-    args.push_back(token);
-  }
-  fclose(file);
-  __android_log_print(ANDROID_LOG_INFO,
-                      "blender",
-                      "[BlenderAndroid] %zu launch argument(s) from %s",
-                      args.size(),
-                      path.c_str());
   return args;
 }
 
@@ -255,6 +267,28 @@ extern "C" JNIEXPORT void JNICALL Java_com_kronos3d_app_BlenderActivity_nativeOp
 
 extern "C" void android_main(struct android_app *app)
 {
+  /* Claim Blender's "main thread" here, before anything else runs.
+   *
+   * BLI_threadapi_init() records the calling thread in `mainid`, and
+   * BLI_thread_is_main() compares against it. ctx_wm_python_context_get() ends
+   * with `if (!BLI_thread_is_main()) return nullptr;`, so every CTX_wm_window()
+   * / _workspace() / _screen() / _area() / _region() on a thread that is not
+   * `mainid` answers null rather than the real pointer.
+   *
+   * creator.cc skips this call on Android, so without it here nothing claims the
+   * role at all: `mainid` stays zero, and WM_main_loop_body -- which runs on this
+   * glue thread, not on the init thread -- sees a null context window on every
+   * frame. The first frame then faults in ED_workspace_do_listen() reading
+   * CTX_wm_workspace(C), a null dereference at +0x208, which is the SIGSEGV that
+   * ended every run two milliseconds after "event loop ready".
+   *
+   * This thread is the right one to own it: it pumps the ALooper and runs
+   * WM_main_loop_body for the life of the process. The launch thread is a
+   * one-shot worker for init. ANativeActivity_onCreate() is itself not the
+   * process main thread (that is the JVM's), so the process main thread was never
+   * the right answer either. */
+  blender::BLI_threadapi_init();
+
   ghost_android_redirect_stdio();
   GHOST_SystemAndroid::setAndroidApp(app);
   app->onAppCmd = on_app_cmd;
