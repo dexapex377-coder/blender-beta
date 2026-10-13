@@ -615,9 +615,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-symbols
-          path: build/lib/libblender.so
+          # The checkout lands in `blender/` and the build step does `cd blender`, so from
+          # the workspace root the pre-strip library is here.
+          path: blender/build/lib/libblender.so
           retention-days: 7
-          if-no-files-found: error
+          # Never fail the build over this: the compile is the expensive part, and losing
+          # the symbols costs one future diagnosis rather than this run.
+          if-no-files-found: warn
 
       - name: Upload logs on failure
         if: failure()
