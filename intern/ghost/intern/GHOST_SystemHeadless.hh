@@ -132,6 +132,18 @@ class GHOST_SystemHeadless : public GHOST_System {
 #  elif defined(__APPLE__)
         GHOST_Context *context = new GHOST_ContextVK(
             context_params_offscreen, nullptr, 1, 1, gpu_settings.preferred_device);
+#  elif defined(__ANDROID__)
+        /* Headless still creates a Vulkan context, and on Android the surface comes from
+         * an ANativeWindow rather than an X11/Wayland handle. There is no window here, so
+         * the headless platform type with null handles is what the constructor takes --
+         * the same shape the #else branch below uses, minus the X11/Wayland arguments the
+         * __ANDROID__ branch of the constructor does not have. */
+        GHOST_Context *context = new GHOST_ContextVK(context_params_offscreen,
+                                                     /* native_window */
+                                                     nullptr,
+                                                     1,
+                                                     1,
+                                                     gpu_settings.preferred_device);
 #  else
         GHOST_Context *context = new GHOST_ContextVK(context_params_offscreen,
                                                      GHOST_kVulkanPlatformHeadless,
