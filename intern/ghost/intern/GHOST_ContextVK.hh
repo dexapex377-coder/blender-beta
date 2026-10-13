@@ -22,6 +22,8 @@ struct SDL_Window; /* Avoid pulling in the full SDL3 headers. */
 #elif defined(__APPLE__)
 #  include "GHOST_SystemCocoa.hh"
 #  include <vulkan/vulkan_metal.h>
+#elif defined(__ANDROID__)
+struct ANativeWindow;
 #else
 #  ifdef WITH_GHOST_X11
 #    include "GHOST_SystemX11.hh"
@@ -121,6 +123,8 @@ class GHOST_ContextVK : public GHOST_Context {
 #elif defined(__APPLE__)
                   /* FIXME CAMetalLayer but have issue with linking. */
                   void *metal_layer,
+#elif defined(__ANDROID__)
+                  ANativeWindow *native_window,
 #else
                   GHOST_TVulkanPlatformType platform,
                   /* X11 */
@@ -173,6 +177,24 @@ class GHOST_ContextVK : public GHOST_Context {
    * GHOST_kFailure if releasing the handles will interfere with sharing
    */
   GHOST_TSuccess releaseNativeHandles() override;
+
+#ifdef __ANDROID__
+  /**
+   * Rebuild the Vulkan surface (and swapchain) for a new ANativeWindow.
+   *
+   * Android destroys and recreates the window's native surface on events like
+   * doze/wake or rotation; the old swapchain then references a dead surface and
+   * presents nothing. Pass the new window (or nullptr on teardown) to recreate.
+   */
+  GHOST_TSuccess setAndroidNativeWindow(ANativeWindow *native_window);
+
+ private:
+  /** Applied at the swap boundary (render thread) when the window was replaced. */
+  void applyAndroidSurfaceChange();
+  bool android_surface_dirty_ = false;
+
+ public:
+#endif
 
   /**
    * Gets the Vulkan context related resource handles.
@@ -255,6 +277,8 @@ class GHOST_ContextVK : public GHOST_Context {
 #elif defined(__APPLE__)
   /* Is CAMetalLayer* */
   void *metal_layer_;
+#elif defined(__ANDROID__)
+  ANativeWindow *native_window_;
 #else /* Linux */
   GHOST_TVulkanPlatformType platform_;
   /* X11 */

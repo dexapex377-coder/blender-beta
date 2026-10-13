@@ -294,6 +294,12 @@ jobs:
           # valid for everything that did compile; ninja recompiles what changed and cmake
           # re-runs when a CMakeLists moved.
           key: builddir-android-${{ runner.os }}-${{ github.sha }}
+          # Prefix fallback is the point here: this tree exists so that changing one
+          # .cc or .hh recompiles what depends on it instead of all ~7700 targets. An
+          # exact-only key is a full rebuild every single time, which is an hour per
+          # compile-fix cycle.
+          restore-keys: |
+            builddir-android-${{ runner.os }}-
           enableCrossOsArchive: false
           restore-keys: |
             builddir-android-${{ runner.os }}-
@@ -426,6 +432,20 @@ jobs:
         run: |
           set -o pipefail
           cd blender
+          # It has to come after the -C on the command line to win, which is why this
+          # sits above the cmake line and not inline in it: a '#' comment between
+          # backslash-continued lines eats the trailing backslash, the command splits
+          # in half, and the next flag runs as its own program.
+          # After the -C so it wins: blender_release.cmake does
+          # set(WITH_TBB_MALLOC_PROXY ON CACHE BOOL "" FORCE). tbbmalloc tags its
+          # pointers on arm64, so one reaching bionic's free() instead of the proxy's
+          # aborts the process at dlopen, inside whatever library's static constructor is
+          # running at the time -- which reads as a bug in that library, not in this:
+          #   Abort message: 'Pointer tag for 0x... was truncated'
+          #     #05 linker64 __dl__ZN6soinfo17call_constructorsEv
+          # The tell is libblender.so's DT_NEEDED: with the proxy it gains
+          # libtbbmalloc.so and libtbbmalloc_proxy.so.
+            -DWITH_TBB_MALLOC_PROXY=OFF \
           cmake -B build \
             -S . \
             -DTARGET_ANDROID=ON \
@@ -435,6 +455,7 @@ jobs:
             -DBLENDER_ANDROID_CONFIG=full \
             -DBUILD_BASE=${{ github.workspace }}/blender \
             -C build_files/cmake/config/blender_release.cmake \
+            -DWITH_TBB_MALLOC_PROXY=OFF \
             -DWITH_TESTS=OFF \
             -DWITH_PYTHON_INSTALL=ON \
             -DWITH_COMPILER_CCACHE=ON \
@@ -505,6 +526,18 @@ jobs:
           readelf --dyn-syms -W "$STAGED" | grep -q _ZNSt6__ndk113__hash_memoryEPKvm \
             || { echo "ERROR: staged libc++_shared.so is missing __hash_memory -- wrong NDK"; exit 1; }
           echo "staged libc++_shared.so OK"
+
+      # AFTER the build, never before it: placed above, blender/build does not exist yet,
+      # the save finishes in zero seconds with an empty archive, and the next run misses
+      # again. It was missing from this workflow entirely, which is why every run rebuilt
+      # all ~7700 targets -- an hour per compile-fix cycle. always() so a tree that got as
+      # far as linking is still banked for the next attempt.
+      - name: Save ninja build tree
+        if: always() && steps.cache-builddir.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: blender/build
+          key: builddir-android-${{ runner.os }}-${{ github.sha }}
 
       - name: Package staged Gradle project
         if: steps.cmake-attempt1.outcome == 'success'
