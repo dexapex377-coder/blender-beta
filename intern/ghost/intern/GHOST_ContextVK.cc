@@ -15,6 +15,10 @@
 #  define VK_USE_PLATFORM_WIN32_KHR
 #elif defined(__APPLE__)
 #  define VK_USE_PLATFORM_METAL_EXT
+#elif defined(__ANDROID__)
+#  ifndef VK_USE_PLATFORM_ANDROID_KHR /* Also set build-wide, so volk generates the surface loader. */
+#    define VK_USE_PLATFORM_ANDROID_KHR
+#  endif
 #else
 #  ifdef WITH_GHOST_X11
 #    define VK_USE_PLATFORM_XLIB_KHR
@@ -31,6 +35,11 @@
 
 #include "GHOST_ContextVK.hh"
 #include "GHOST_Types.hh"
+
+#ifdef __ANDROID__
+#  include "GHOST_AndroidMemoryTier.hh"
+#  include <android/log.h>
+#endif
 
 #include "vulkan/vk_ghost_api.hh"
 
@@ -884,6 +893,8 @@ GHOST_ContextVK::GHOST_ContextVK(const GHOST_ContextParams &context_params,
                                  HWND hwnd,
 #elif defined(__APPLE__)
                                  void *metal_layer,
+#elif defined(__ANDROID__)
+                                 ANativeWindow *native_window,
 #else
                                  GHOST_TVulkanPlatformType platform,
                                  /* X11 */
@@ -906,6 +917,8 @@ GHOST_ContextVK::GHOST_ContextVK(const GHOST_ContextParams &context_params,
       hwnd_(hwnd),
 #elif defined(__APPLE__)
       metal_layer_(metal_layer),
+#elif defined(__ANDROID__)
+      native_window_(native_window),
 #else
       platform_(platform),
       /* X11 */
@@ -1730,6 +1743,8 @@ std::vector<const char *> GHOST_ContextVK::getPlatformSpecificSurfaceExtensions(
   extensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 #elif defined(__APPLE__)
   extensions.push_back(VK_EXT_METAL_SURFACE_EXTENSION_NAME);
+#elif defined(__ANDROID__)
+  extensions.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
 #else /* UNIX/Linux */
   switch (platform_) {
 #  ifdef WITH_GHOST_X11
@@ -1866,6 +1881,14 @@ GHOST_TSuccess GHOST_ContextVK::initializeDrawingContext()
     info.flags = 0;
     info.pLayer = static_cast<CAMetalLayer *>(metal_layer_);
     VK_CHECK(volk::vkCreateMetalSurfaceEXT(instance_vk.vk_instance, &info, nullptr, &surface_),
+             GHOST_kFailure);
+#elif defined(__ANDROID__)
+    VkAndroidSurfaceCreateInfoKHR info = {};
+    info.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
+    info.pNext = nullptr;
+    info.flags = 0;
+    info.window = native_window_;
+    VK_CHECK(volk::vkCreateAndroidSurfaceKHR(instance_vk.vk_instance, &info, nullptr, &surface_),
              GHOST_kFailure);
 #else
     switch (platform_) {
