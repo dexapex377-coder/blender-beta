@@ -451,6 +451,10 @@ jobs:
           echo "=== Building ISPC (host tool) + OIDN static ==="
           bash build_files/android/deps/build.sh ispc oidn
           echo "=== Validating OIDN static output ==="
+          # Which archives exist, and how big: libOpenImageDenoise.a holds only the
+          # API, and without _core/_device_cpu the link fails with undefined
+          # oidn::Context symbols.
+          find "$LIBDIR/openimagedenoise/lib" -maxdepth 1 -name "*.a" -printf "  %f  %s bytes\n" | sort
           ls "$LIBDIR/openimagedenoise/lib/"*.a || { echo "ERROR: no OIDN .a produced"; exit 1; }
           if ls "$LIBDIR/openimagedenoise/lib/"*.so 2>/dev/null; then
             echo "ERROR: OIDN .so still present (shared layout)"; exit 1

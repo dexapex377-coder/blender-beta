@@ -316,7 +316,20 @@ if(WITH_OPENIMAGEDENOISE)
   # variables the rest of the build reads.
   find_package(OpenImageDenoise CONFIG REQUIRED)
   set(OPENIMAGEDENOISE_INCLUDE_DIRS ${LIBDIR}/openimagedenoise/include)
-  set(OPENIMAGEDENOISE_LIBRARIES OpenImageDenoise)
+  # OIDN's static build splits into libOpenImageDenoise.a plus separate _core and
+  # _device_cpu archives. find_package(CONFIG) carries the API archive onto the link
+  # line but not the other two, and the link then fails with undefined oidn::Context
+  # or oidn::Device symbols -- reported against api.cpp.o in the archive, which makes
+  # the error look like the archive is wrong rather than incomplete. Name them
+  # explicitly, in the order the linker needs.
+  foreach(_oidn_archive
+      ${LIBDIR}/openimagedenoise/lib/libOpenImageDenoise.a
+      ${LIBDIR}/openimagedenoise/lib/libOpenImageDenoise_core.a
+      ${LIBDIR}/openimagedenoise/lib/libOpenImageDenoise_device_cpu.a)
+    if(EXISTS ${_oidn_archive})
+      list(APPEND OPENIMAGEDENOISE_LIBRARIES ${_oidn_archive})
+    endif()
+  endforeach()
   set(OPENIMAGEDENOISE_FOUND ON)
 endif()
 
