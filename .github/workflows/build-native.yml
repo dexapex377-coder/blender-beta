@@ -301,8 +301,6 @@ jobs:
           restore-keys: |
             builddir-android-${{ runner.os }}-
           enableCrossOsArchive: false
-          restore-keys: |
-            builddir-android-${{ runner.os }}-
 
       # 5.3 beta added platform_android.cmake, which refuses to configure until the host
       # code generators exist. They are not in any prebuilt package -- makesdna, makesrna,
