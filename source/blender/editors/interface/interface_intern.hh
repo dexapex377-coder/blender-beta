@@ -84,7 +84,6 @@ struct UndoStack_Text;
 #else
 #  define UI_MENU_SCROLL_ARROW (12 * UI_SCALE_FAC)
 #endif
-#define UI_MENU_SCROLL_ARROW (12 * UI_SCALE_FAC)
 #define UI_MENU_SCROLL_MOUSE (UI_MENU_SCROLL_ARROW + 2 * UI_SCALE_FAC)
 #define UI_MENU_SCROLL_PAD (4 * UI_SCALE_FAC)
 
@@ -1128,6 +1127,21 @@ struct PopupBlockHandle {
 
   bool mmb_panning = false;
   int mmb_panning_last_y = 0;
+
+  /* Touch: dragging an over-long menu or dialog with a finger.
+   *
+   * The mouse reaches a clipped popup two ways, and a finger has neither: it hovers the arrow
+   * band and the menu auto-scrolls on a timer, or it holds the middle button and pans. So a
+   * press inside a clipped popup arms this, a motion past the drag threshold turns it into a
+   * pan, and the release is swallowed so the item the finger ended over is not pressed. A press
+   * that never moves is left alone and activates the item as it always did.
+   * See ANDROID_TOUCH_UI_SCALE_STUDY.md. */
+  bool touch_scroll_armed = false;
+  bool touch_scroll_panning = false;
+  int touch_scroll_start_y = 0;
+  int touch_scroll_last_y = 0;
+  /** 't', 'b' or 0: which arrow band the press landed in, for a tap that never becomes a drag. */
+  char touch_scroll_arrow = 0;
   /** Short period of time that prevents closing the current menu with ongoing actions like middle
    * mouse panning.  */
   wmTimer *keep_open_timer = nullptr;

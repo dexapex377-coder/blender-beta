@@ -65,8 +65,26 @@ struct SPIRVSidecar {
 
 static uint32_t spirv_target_version_get()
 {
+#ifdef __ANDROID__
+  /* Ask for SPIR-V 1.3 on Android whatever the device advertises.
+   *
+   * Every mobile GPU driver here -- Adreno, Mali and PowerVR -- refuses or mishandles a number
+   * of modules emitted as SPIR-V 1.4 or later: modules `spirv-val` accepts and every desktop
+   * driver builds, but which come back VK_ERROR_UNKNOWN from vkCreateComputePipelines, or carry
+   * an OpCopyLogical for a struct copy that the driver rejects at pipeline creation. Those are
+   * the modules Eevee uses for shadows and light culling, so there is nothing to switch off
+   * instead. An Adreno driver refusing compute pipelines outright was traced back to exactly
+   * this, and the workaround was a --gpu-force-workarounds flag that cost 5-18% of the frame.
+   *
+   * Blender asks for no SPIR-V 1.4 feature, so the older target costs nothing.
+   *
+   * Note this is a property of the shader compiler, not of the Vulkan instance version: the
+   * instance may declare 1.3 (SPIR-V 1.6) and the generator still has to emit 1.3 here. */
+  return shaderc_spirv_version_1_3;
+#else
   const VKDevice &device = VKBackend::get().device;
   return device.extensions_get().spirv_1_4 ? shaderc_spirv_version_1_4 : shaderc_spirv_version_1_3;
+#endif
 }
 
 static bool read_spirv_from_disk(VKShaderModule &shader_module, StringRef hash_extra)
