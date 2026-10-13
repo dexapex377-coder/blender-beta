@@ -1469,111 +1469,6 @@ static void draw_performance_stats(Depsgraph *depsgraph,
   draw_time_stat(labels[SYNC_TIME], sync_time);
   draw_time_stat(labels[TOTAL], total_time);
 }
-#if defined(__ANDROID__)
-/**
- * Always-on runtime diagnostics for the Statistics overlay.
- *
- * Reads are only valid while the viewport is actively redrawing, and that is
- * intentional, not a bug: with `draw_aa=false` (TAA capped to 1 sample) the
- * viewport no longer redraws in idle, so there are no new frames to sample.
- * The counter refreshes while interacting (orbit/pan/zoom) or during playback --
- * read it then, not at rest. That is the measurement criterion for all
- * performance experiments.
- *
- * Unlike the animation-player FPS (`ED_scene_draw_fps`) and the event-driven
- * "Performance" readout (depsgraph evaluation + CPU-side sync/submission), this
- * timestamps consecutive viewport redraws: it reports the frame rate rendering
- * actually delivers without depending on playback or edits.
- *
- * - FPS: exponential moving average of frame-to-frame delta, reacting within a
- *   couple of redraws. In idle there are no redraws, so the readout holds the
- *   last measured value and appends "(idle)" instead of pretending a number.
- * - RAM: resident set size of this process (MiB), refreshed once a second from
- *   /proc/self/statm. Android exposes no per-app GPU utilization to non-root
- *   apps, so no GPU metric is shown on purpose (RAM does have a public API,
- *   GPU utilization does not).
- */
-static void draw_android_perf_stats(const float text_color[4],
-                                    const int xoffset,
-                                    int *yoffset,
-                                    const int line_height)
-{
-  using Clock = std::chrono::steady_clock;
-
-  const Clock::time_point now = Clock::now();
-
-  /* Exponential moving average of per-frame time, updated on every redraw so the
-   * readout reacts within a couple of frames. A gap between redraws means idle
-   * (no new frames being produced) -- do not feed it to the average, and surface
-   * it on screen instead so it is obvious the number is held, not broken. */
-  static Clock::time_point prev_frame = Clock::now();
-  static bool have_frame = false;
-  static double ema_ms = 0.0;
-  static constexpr double ema_alpha = 0.15;
-  static constexpr double frame_gap_ms = 500.0;
-
-  const double dt_ms = std::chrono::duration<double, std::milli>(now - prev_frame).count();
-  const bool stale = have_frame && dt_ms >= frame_gap_ms;
-  prev_frame = now;
-  if (dt_ms > 0.0 && dt_ms < frame_gap_ms) {
-    ema_ms = have_frame ? ema_ms + ema_alpha * (dt_ms - ema_ms) : dt_ms;
-    have_frame = true;
-  }
-
-  /* RSS once a second. */
-  static int ram_mb = -1;
-  static Clock::time_point last_tick = Clock::now();
-  if (now - last_tick >= std::chrono::seconds(1)) {
-    last_tick = now;
-    long pages = -1;
-    FILE *f = fopen("/proc/self/statm", "r");
-    if (f != nullptr) {
-      if (fscanf(f, "%*ld %ld", &pages) == 1) {
-        const long page_kb = long(sysconf(_SC_PAGESIZE) / 1024);
-        ram_mb = int((pages * page_kb) / 1024);
-      }
-      fclose(f);
-    }
-  }
-
-  const int font_id = BLF_default();
-  const std::string labels[2] = {"FPS (real)", "RAM (app)"};
-
-  float longest_label = 0;
-  for (const std::string &label : labels) {
-    longest_label = std::max(longest_label, BLF_width(font_id, label.c_str(), label.size()));
-  }
-
-  const int xoffset2 = xoffset + int(longest_label) + int(0.5f * U.widget_unit);
-
-  std::string values[2];
-  /* FPS in red when it drops below this mobile-target floor. */
-  const float alert_fps = 30.0f;
-  if (have_frame) {
-    const double fps = 1000.0 / ema_ms;
-    values[0] = fmt::format("{:.1f} ({:.1f} ms)", fps, ema_ms);
-    if (stale) {
-      values[0] += " (idle)";
-    }
-    if (fps < alert_fps) {
-      float4 alert_rgb = get_low_fps_color();
-      BLF_color4fv(font_id, alert_rgb);
-    }
-  }
-  else {
-    values[0] = "--";
-  }
-  values[1] = (ram_mb >= 0) ? fmt::format("{} MiB", ram_mb) : "N/D";
-
-  for (int i = 0; i < 2; i++) {
-    *yoffset -= line_height;
-    BLF_draw_default(xoffset, *yoffset, 0.0f, labels[i].c_str(), labels[i].size());
-    BLF_draw_default(xoffset2, *yoffset, 0.0f, values[i].c_str(), values[i].size());
-  }
-  BLF_color4fv(font_id, text_color);
-}
-#endif /* __ANDROID__ */
-
 void view3d_draw_region_info(const bContext *C, ARegion *region)
 {
   RegionView3D *rv3d = static_cast<RegionView3D *>(region->regiondata);
@@ -1697,10 +1592,8 @@ void view3d_draw_region_info(const bContext *C, ARegion *region)
       View3D *v3d_local = v3d->localvd ? v3d : nullptr;
       ED_info_draw_stats(
           bmain, scene, view_layer, v3d_local, xoffset, &yoffset, VIEW3D_OVERLAY_LINEHEIGHT);
-#if defined(__ANDROID__)
-      draw_android_perf_stats(text_color, xoffset, &yoffset, VIEW3D_OVERLAY_LINEHEIGHT);
-#endif
-    }    }
+    }
+  }
 
     /* Set the size back to the default hard-coded size. Otherwise anyone drawing after this,
      * without setting explicit size, will draw with widget size. That is probably ideal,
