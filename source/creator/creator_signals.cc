@@ -236,6 +236,8 @@ void main_signal_setup()
   if (app_state.signal.use_crash_handler) {
 #  ifdef WIN32
     SetUnhandledExceptionFilter(windows_exception_handler);
+#  elif defined(__ANDROID__)
+    /* Let debuggerd produce a native backtrace/tombstone on Android. */
 #  else
     /* After parsing arguments. */
     signal(SIGSEGV, sig_handle_crash_fn);

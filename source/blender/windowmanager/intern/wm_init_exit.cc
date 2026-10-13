@@ -109,6 +109,15 @@
 #include "UI_string_search.hh"
 
 #include "GPU_context.hh"
+#ifdef WITH_GHOST_ANDROID
+#  define WM_ANDROID_BOOT_LOG(stage) \
+    do { \
+      fprintf(stderr, "[BlenderAndroid] WM_init: %s\n", stage); \
+      fflush(stderr); \
+    } while (false)
+#else
+#  define WM_ANDROID_BOOT_LOG(stage) ((void)0)
+#endif
 #include "GPU_init_exit.hh"
 #include "GPU_shader.hh"
 
@@ -234,7 +243,10 @@ void WM_init(bContext *C, int argc, const char **argv)
 {
 
   if (!G.background) {
+    WM_ANDROID_BOOT_LOG("entered");
+
     wm_ghost_init(C); /* NOTE: it assigns C to ghost! */
+    WM_ANDROID_BOOT_LOG("native window and GPU context created");
     wm_init_cursor_data();
     BKE_sound_jack_sync_callback_set(sound_jack_sync_callback);
   }
