@@ -5249,11 +5249,6 @@ static int do_but_BUT(bContext *C, Button *but, HandleButtonData *data, const wm
   }
 #endif
 
-#ifdef __ANDROID__
-  if (retval == WM_UI_HANDLER_CONTINUE) {
-    retval = handle_menu_touch_scroll_event(C, event, menu, inside);
-  }
-#endif
   if (button_draw_as_link(but)) {
     if (data->window->cursor != WM_CURSOR_HAND_POINT) {
       WM_cursor_modal_set(data->window, WM_CURSOR_HAND_POINT);
@@ -11937,6 +11932,11 @@ static int handle_menu_event(bContext *C,
 
       return retval;
     }
+  }
+#endif
+#ifdef __ANDROID__
+  if (retval == WM_UI_HANDLER_CONTINUE) {
+    retval = handle_menu_touch_scroll_event(C, event, menu, inside);
   }
 #endif
   if (retval == WM_UI_HANDLER_CONTINUE) {
