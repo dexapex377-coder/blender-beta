@@ -443,7 +443,6 @@ jobs:
           #     #05 linker64 __dl__ZN6soinfo17call_constructorsEv
           # The tell is libblender.so's DT_NEEDED: with the proxy it gains
           # libtbbmalloc.so and libtbbmalloc_proxy.so.
-            -DWITH_TBB_MALLOC_PROXY=OFF \
           cmake -B build \
             -S . \
             -DTARGET_ANDROID=ON \
