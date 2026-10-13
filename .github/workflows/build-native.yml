@@ -527,7 +527,9 @@ jobs:
           # and 'local: *' in symbols_android.map hides anything not listed there -- so the
           # APK installs fine and then dies in onCreate. Assert it on the staged library,
           # where the problem is visible, rather than on a phone, where it is not.
-          STAGED_SO="$JNI/libblender.so"
+          # $JNI lives inside package.sh and does not survive the call, so rebuild the path
+          # the way package.sh does: STAGE="$BUILD_BASE/android_apk_stage_$CONFIG", JNI="$STAGE/lib/arm64-v8a".
+          STAGED_SO="$BUILD_BASE/android_apk_stage_full/lib/arm64-v8a/libblender.so"
           test -s "$STAGED_SO" || { echo "ERROR: no staged libblender.so at $STAGED_SO"; exit 1; }
           if readelf --dyn-syms -W "$STAGED_SO" | grep -q ANativeActivity_onCreate; then
             echo "staged libblender.so exports ANativeActivity_onCreate"
