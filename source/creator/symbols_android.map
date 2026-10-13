@@ -16,6 +16,23 @@ global:
    * decides whether it reaches .dynsym. android_main goes with it. */
   ANativeActivity_onCreate;
   android_main;
+  /* The JNI entry points of BlenderActivity, resolved by name from the JVM: the VM
+   * looks each one up with dlsym() on the library System.loadLibrary() returned, so
+   * 'local: *' hides them just as surely as it hid ANativeActivity_onCreate above.
+   * Nothing reports a missing one at build time or at load -- the library opens
+   * fine and the failure only shows up when the method is first called:
+   *   java.lang.UnsatisfiedLinkError: No implementation found for void
+   *     com.kronos3d.app.BlenderActivity.nativeSendKeyCombo(int, int, int)
+   *   (tried Java_com_kronos3d_app_BlenderActivity_nativeSendKeyCombo and
+   *    Java_com_kronos3d_app_BlenderActivity_nativeSendKeyCombo__III)
+   *   - is the library loaded, e.g. System.loadLibrary?
+   * which killed the app the moment the Kronos shortcuts panel sent its first key.
+   * Five methods ride on this: nativeOnCommitText, nativeOnKey,
+   * nativeOpenMainFile, nativeSendKeyCombo and nativeSetModifierLatched -- the
+   * on-screen keyboard, opening a .blend from a file manager, and the shortcuts
+   * panel. Java_* matches only the mangled-free JNI names, so it exposes these
+   * and nothing else. */
+  Java_*;
   /* Needed for Python modules to work. */
   Py*;
   _Py*;

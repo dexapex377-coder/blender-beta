@@ -538,6 +538,23 @@ jobs:
             echo "       symbols_android.map needs it in its global: list"
             exit 1
           fi
+          # Same trap for the JNI entry points, and it is quieter: the library loads,
+          # the app starts, and the failure only appears the first time a method is
+          # called -- "No implementation found for void ...BlenderActivity.nativeXxx".
+          # That is how a build can sit here looking perfect while the Kronos
+          # shortcuts panel, the on-screen keyboard and .blend opening are all dead.
+          MISSING=""
+          for sym in nativeOnCommitText nativeOnKey nativeOpenMainFile \
+                     nativeSendKeyCombo nativeSetModifierLatched; do
+            readelf --dyn-syms -W "$STAGED_SO" \
+              | grep -q "Java_com_kronos3d_app_BlenderActivity_$sym" || MISSING="$MISSING $sym"
+          done
+          if [ -n "$MISSING" ]; then
+            echo "ERROR: staged libblender.so exports no JNI symbol for:$MISSING"
+            echo "       symbols_android.map needs 'Java_*;' in its global: list"
+            exit 1
+          fi
+          echo "staged libblender.so exports all five JNI entry points"
           if readelf -d "$STAGED_SO" | grep NEEDED | grep -q libtbbmalloc_proxy; then
             echo "ERROR: staged libblender.so links libtbbmalloc_proxy.so (allocator mismatch)"
             exit 1
