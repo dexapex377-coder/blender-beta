@@ -5149,6 +5149,13 @@ static void do_but_extra_operator_icons_mousemove(Button *but,
  * must keep meaning that. False inside menus too: those scroll on their own path through
  * #ui_handle_menu_event.
  */
+/* Forward declaration: the touch scroll helper is defined much further down, and the
+ * call site sits in ui_handle_menu_event above it. */
+static int handle_menu_touch_scroll_event(bContext *C,
+                                          const wmEvent *event,
+                                          PopupBlockHandle *menu,
+                                          const bool inside);
+
 static bool but_touch_scroll_region(const Button *but, const HandleButtonData *data)
 {
   if (but->block && block_is_menu(but->block)) {
