@@ -2335,7 +2335,7 @@ static void handle_layout_panel_header(
   ED_region_tag_redraw(CTX_wm_region(C));
   WM_tooltip_clear(C, CTX_wm_window(C));
 
-  if (event_type == LEFTMOUSE) {
+  if (event_type == LEFTMOUSE && !PANEL_TOUCH_SCROLL) {
     panel_drag_collapse_handler_add(C, !new_state);
   }
 }
@@ -2401,7 +2401,7 @@ static void handle_panel_header(const bContext *C,
 
     SET_FLAG_FROM_TEST(panel->flag, !panel_is_closed(panel), PNL_CLOSED);
 
-    if (event_type == LEFTMOUSE) {
+    if (event_type == LEFTMOUSE && !PANEL_TOUCH_SCROLL) {
       panel_drag_collapse_handler_add(C, panel_is_closed(panel));
     }
 

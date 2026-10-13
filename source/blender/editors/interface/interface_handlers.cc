@@ -11744,7 +11744,7 @@ static int handle_menu_touch_scroll_event(bContext *C,
                                           const bool inside)
 {
   ARegion *region = menu->region;
-  Block *block = static_cast<Block *>(region->runtime->uiblocks.first);
+  Block *block = region->runtime->uiblocks.first();
   if (block == nullptr) {
     return WM_UI_HANDLER_CONTINUE;
   }
