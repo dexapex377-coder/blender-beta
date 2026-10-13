@@ -11846,9 +11846,9 @@ static int handle_menu_event(bContext *C,
                              const bool is_parent_menu,
                              const bool is_floating)
 {
-  int retval = WM_UI_HANDLER_CONTINUE;
   Button *but;
   ARegion *region = menu->region;
+  Block *block = region->runtime->uiblocks.first();
 
 #ifdef __ANDROID__
   if (menu == nullptr || region == nullptr || region->runtime == nullptr ||
@@ -11857,18 +11857,6 @@ static int handle_menu_event(bContext *C,
     return WM_UI_HANDLER_CONTINUE;
   }
 #endif
-
-static int handle_menu_event(bContext *C,
-                             const wmEvent *event,
-                             PopupBlockHandle *menu,
-                             int level,
-                             const bool is_parent_inside,
-                             const bool is_parent_menu,
-                             const bool is_floating)
-{
-  Button *but;
-  ARegion *region = menu->region;
-  Block *block = region->runtime->uiblocks.first();
 
   int retval = WM_UI_HANDLER_CONTINUE;
 

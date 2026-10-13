@@ -57,13 +57,6 @@
 #include "interface_intern.hh"
 
 namespace blender::ui {
-#ifdef __ANDROID__
-  if (event->type == LEFTMOUSE) {
-    return event->val == KM_CLICK;
-  }
-#else
-  UNUSED_VARS(event);
-#endif
 
 /* -------------------------------------------------------------------- */
 /** \name Defines & Structs
@@ -2278,6 +2271,28 @@ static int panel_drag_collapse_handler(bContext *C, const wmEvent *event, void *
 #  define PANEL_TOUCH_SCROLL false
 #endif
 
+/**
+ * Whether an event over a panel header should collapse or expand it now.
+ *
+ * On a touch screen it should not, until the press is known to be a tap rather than the
+ * start of a drag: headers are much of what a panel region is made of, so a drag that
+ * begins on one has to scroll the region instead. The window manager turns a release into
+ * #KM_CLICK only when the drag threshold was never crossed, which is exactly that
+ * distinction. `but_touch_scroll_region` in `interface_handlers.cc` does the same for
+ * widgets.
+ */
+static bool panel_header_event_is_activate(const wmEvent *event)
+{
+#ifdef __ANDROID__
+  if (event->type == LEFTMOUSE) {
+    return event->val == KM_CLICK;
+  }
+#else
+  UNUSED_VARS(event);
+#endif
+  return true;
+}
+
 void panel_drag_collapse_handler_add(const bContext *C, const bool was_open)
 {
   wmWindow *win = CTX_wm_window(C);
@@ -2772,7 +2787,9 @@ int handler_panel_region(bContext *C,
 
     if ((has_panel_header && mouse_state == PANEL_MOUSE_INSIDE_HEADER)) {
       /* All mouse clicks inside panel headers should return in break. */
-      if (ELEM(event->type, EVT_RETKEY, EVT_PADENTER, LEFTMOUSE)) {
+      if (ELEM(event->type, EVT_RETKEY, EVT_PADENTER, LEFTMOUSE) &&
+          panel_header_event_is_activate(event))
+      {
         retval = WM_UI_HANDLER_BREAK;
         handle_panel_header(
             C, &block, mx, event->type, event->modifier & KM_CTRL, event->modifier & KM_SHIFT);
@@ -2783,7 +2800,9 @@ int handler_panel_region(bContext *C,
       break;
     }
     if (mouse_state == PANEL_MOUSE_INSIDE_LAYOUT_PANEL_HEADER) {
-      if (ELEM(event->type, EVT_RETKEY, EVT_PADENTER, LEFTMOUSE)) {
+      if (ELEM(event->type, EVT_RETKEY, EVT_PADENTER, LEFTMOUSE) &&
+          panel_header_event_is_activate(event))
+      {
         retval = WM_UI_HANDLER_BREAK;
         handle_layout_panel_header(C, &block, mx, my, event->type);
       }
