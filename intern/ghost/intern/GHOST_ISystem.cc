@@ -14,6 +14,9 @@
 
 #include "GHOST_ISystem.hh"
 #include "GHOST_SystemHeadless.hh"
+#ifdef WITH_GHOST_ANDROID
+#  include "GHOST_SystemAndroid.hh"
+#endif
 
 #if defined(WITH_GHOST_X11) && defined(WITH_GHOST_WAYLAND)
 #  include "GHOST_SystemWayland.hh"
@@ -137,6 +140,24 @@ GHOST_TSuccess GHOST_ISystem::createSystem(bool verbose, [[maybe_unused]] bool b
       }
     }
     else {
+      system_ = nullptr;
+    }
+#elif defined(WITH_GHOST_ANDROID)
+    /* NativeActivity supplies the window through android_native_app_glue, so there is one
+     * system and no backends to fall back through. It throws if the window is not there
+     * yet, which is why the message is worth logging rather than just returning failure --
+     * an empty backends_attempted list is what "Failed to initialize display for
+     * back-end(s): []" means. */
+    backends_attempted.push_back({"ANDROID"});
+    try {
+      CLOG_INFO(&LOG, "Create Android system");
+      system_ = new GHOST_SystemAndroid();
+    }
+    catch (const std::runtime_error &e) {
+      if (verbose) {
+        backends_attempted.back().failure_msg = e.what();
+      }
+      delete system_;
       system_ = nullptr;
     }
 #elif defined(WITH_GHOST_SDL)
