@@ -354,6 +354,19 @@ void GHOST_System::useWindowFocus(const bool use_focus)
   window_focus_ = use_focus;
 }
 
+/* Declared virtual on GHOST_ISystem with no body there, so every backend has to be
+ * linked against a definition or the vtable reference is unresolved. Platforms
+ * with a physical keyboard never call these; Android overrides both. */
+GHOST_TSuccess GHOST_System::popupOnScreenKeyboard(GHOST_IWindow * /*window*/)
+{
+  return GHOST_kSuccess;
+}
+
+GHOST_TSuccess GHOST_System::hideOnScreenKeyboard(GHOST_IWindow * /*window*/)
+{
+  return GHOST_kSuccess;
+}
+
 void GHOST_System::setAutoFocus(const bool auto_focus)
 {
   auto_focus_ = auto_focus;

@@ -12,6 +12,7 @@
 #include "GHOST_ISystem.hh"
 #include "GHOST_SystemAndroid.hh"
 
+#include <atomic>
 #include <android/log.h>
 #include <android_native_app_glue.h>
 #include <cstdio>
@@ -55,19 +56,30 @@ static void ghost_android_redirect_stdio()
 
 namespace blender {
 struct bContext;
+struct GPUContext;
 /* Implemented in creator: runs Blender init + WM_main_entry, hands C back. */
 int GHOST_android_launch(int argc, const char **argv);
 void WM_main_loop_body(bContext *C);
+void GPU_context_active_set(GPUContext *gpu_ctx);
 }  // namespace blender
 
 static blender::bContext *g_context = nullptr;
+static blender::GPUContext *g_gpu_context = nullptr;
 static bool g_blender_launched = false;
 
 namespace blender {
-/* Called by the creator once init finished, to hand the context to the loop. */
-void GHOST_androidfinalize(bContext *C)
+/* Called by the creator once init finished, to hand the context to the loop.
+ *
+ * Both `g_context` and `g_gpu_context` are read by `android_main` on the glue
+ * thread while the creator writes them on `ghost_android_launch_thread`, so they
+ * need release/acquire semantics: without it the loop can observe a half-published
+ * pair (context visible, GPU context not) and draw against a null backend. */
+void GHOST_androidfinalize(bContext *C, GPUContext *gpu_ctx)
 {
+  std::atomic_thread_fence(std::memory_order_release);
+  g_gpu_context = gpu_ctx;
   g_context = C;
+  std::atomic_thread_fence(std::memory_order_release);
 }
 }  // namespace blender
 
@@ -248,6 +260,8 @@ extern "C" void android_main(struct android_app *app)
   app->onAppCmd = on_app_cmd;
   app->onInputEvent = on_input_event;
 
+  bool gpu_context_adopted = false;
+
   while (!app->destroyRequested) {
     int events;
     android_poll_source *source;
@@ -267,6 +281,17 @@ extern "C" void android_main(struct android_app *app)
       if (g_context) {
         timeout = 0;
       }
+    }
+
+    /* `GPU_context_create()` ran on the init thread, and the backend's active context is
+     * thread_local, so it is null here. The loop that draws runs on this glue thread and
+     * resolves the context through it: without adopting it, the first swapBufferAcquire
+     * dereferences null in sync_backbuffer() -- a SIGSEGV after exactly one frame has been
+     * submitted, which reads as "black screen then crash on first redraw". */
+    if (g_context && g_gpu_context && !gpu_context_adopted) {
+      std::atomic_thread_fence(std::memory_order_acquire);
+      blender::GPU_context_active_set(g_gpu_context);
+      gpu_context_adopted = true;
     }
 
     if (g_context) {
