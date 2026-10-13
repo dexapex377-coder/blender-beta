@@ -289,10 +289,10 @@ class GHOST_ISystem {
 
   /**
    * Show/hide an on-screen keyboard, for platforms without a physical one.
-   * Default implementations are no-ops; only touch backends act on these.
+   * GHOST_System answers for backends that have no soft keyboard; Android overrides both.
    */
-  virtual GHOST_TSuccess popupOnScreenKeyboard(GHOST_IWindow *window);
-  virtual GHOST_TSuccess hideOnScreenKeyboard(GHOST_IWindow *window);
+  virtual GHOST_TSuccess popupOnScreenKeyboard(GHOST_IWindow *window) = 0;
+  virtual GHOST_TSuccess hideOnScreenKeyboard(GHOST_IWindow *window) = 0;
 
   /**
    * Focus and raise windows on mouse hover.
