@@ -166,6 +166,17 @@ void WM_exit(bContext *C, int exit_code) ATTR_NORETURN;
 void WM_main(bContext *C) ATTR_NORETURN;
 
 /**
+ * Split of #WM_main for platforms where the OS owns the frame loop (Android, iOS).
+ * Call #WM_main_entry once, then #WM_main_loop_body per frame.
+ *
+ * #WM_main is exactly this composition, so behaviour is unchanged for the platforms
+ * that let Blender drive the loop; the split only exists so the other kind can return
+ * control to the system between frames instead of never returning.
+ */
+void WM_main_entry(bContext *C);
+void WM_main_loop_body(bContext *C);
+
+/**
  * Show the splash screen as needed on startup.
  *
  * The splash may not show depending on a file being loaded and user preferences.
