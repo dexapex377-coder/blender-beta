@@ -7,6 +7,15 @@ global:
   /* _fini and _init are deliberately absent: bionic's crt objects do not define
    * them, and the link runs with --no-undefined-version, so naming them here fails
    * with "version script assignment of 'global' to symbol '_init' failed". */
+  /* The NativeActivity glue's entry point. Android's NativeActivity.onCreate does a
+   * dlsym() for exactly this name on whatever library System.loadLibrary() returned,
+   * so if 'local: *' below hides it the APK installs and then dies in onCreate with
+   *   java.lang.UnsatisfiedLinkError: ... undefined symbol: ANativeActivity_onCreate
+   * The glue is linked (android_native_app_glue.c, from the NDK) and referenced with
+   * -Wl,-u, but both only put the symbol in the link; the version script is what
+   * decides whether it reaches .dynsym. android_main goes with it. */
+  ANativeActivity_onCreate;
+  android_main;
   /* Needed for Python modules to work. */
   Py*;
   _Py*;

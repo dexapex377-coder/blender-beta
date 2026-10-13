@@ -522,6 +522,27 @@ jobs:
           test -s "$STAGED" || { echo "ERROR: staged payload has no libc++_shared.so"; exit 1; }
           readelf --dyn-syms -W "$STAGED" | grep -q _ZNSt6__ndk113__hash_memoryEPKvm \
             || { echo "ERROR: staged libc++_shared.so is missing __hash_memory -- wrong NDK"; exit 1; }
+          # ANativeActivity_onCreate must be in .dynsym, not just in the link. NativeActivity
+          # .onCreate dlsym()s that exact name out of whatever System.loadLibrary returned,
+          # and 'local: *' in symbols_android.map hides anything not listed there -- so the
+          # APK installs fine and then dies in onCreate. Assert it on the staged library,
+          # where the problem is visible, rather than on a phone, where it is not.
+          STAGED_SO="$JNI/libblender.so"
+          test -s "$STAGED_SO" || { echo "ERROR: no staged libblender.so at $STAGED_SO"; exit 1; }
+          if readelf --dyn-syms -W "$STAGED_SO" | grep -q ANativeActivity_onCreate; then
+            echo "staged libblender.so exports ANativeActivity_onCreate"
+          else
+            echo "ERROR: staged libblender.so does not export ANativeActivity_onCreate"
+            echo "       symbols_android.map needs it in its global: list"
+            exit 1
+          fi
+          if readelf -d "$STAGED_SO" | grep NEEDED | grep -q libtbbmalloc_proxy; then
+            echo "ERROR: staged libblender.so links libtbbmalloc_proxy.so (allocator mismatch)"
+            exit 1
+          fi
+          echo "staged libblender.so: no tbbmalloc proxy"
+          echo "staged libblender.so build-id: $(readelf -n "$STAGED_SO" | grep -oE '[0-9a-f]{40}' | head -1)"
+          echo "staged libblender.so sha256:  $(sha256sum "$STAGED_SO" | awk '{print $1}')"
           echo "staged libc++_shared.so OK"
 
       # AFTER the build, never before it: placed above, blender/build does not exist yet,
