@@ -2481,6 +2481,55 @@ static void WM_OT_window_new_main(wmOperatorType *ot)
   ot->poll = wm_operator_winactive_normal;
 }
 
+#ifdef __ANDROID__
+
+/* -------------------------------------------------------------------- */
+/** \name Open a URL through the platform (Android)
+ *
+ * Every link in the program goes through `wm.url_open`, which calls Python's
+ * `webbrowser.open()`. That module hunts for `xdg-open`, `gio` and `x-www-browser` with
+ * `shutil.which()`, finds none of them on Android, and returns False without raising or
+ * logging anything: the About box links, "Online Manual" on a tool's context menu and the
+ * manual buttons in Preferences all did nothing at all, silently.
+ *
+ * This is the way out, and it is registered with Python's `webbrowser` rather than wired
+ * into `wm.url_open` directly, so that add-ons and #url_prefill_startup reach it too.
+ * See `scripts/startup/bl_android_browser.py`.
+ * \{ */
+
+/* Implemented in GHOST_SystemAndroid.cc. Declared here rather than in a header because the
+ * window manager cannot include GHOST's private headers -- `creator.cc` reaches
+ * #GHOST_HACK_getFirstFile the same way on macOS. */
+extern "C" bool GHOST_android_open_url(const char *url);
+
+static wmOperatorStatus wm_platform_url_open_exec(bContext * /*C*/, wmOperator *op)
+{
+  const std::string url = RNA_string_get(op->ptr, "url");
+  const bool success = !url.empty() && GHOST_android_open_url(url.c_str());
+  if (!success) {
+    /* Saying so is the point: the failure this replaces was completely silent. */
+    BKE_report(op->reports, RPT_ERROR, "Could not open the link");
+  }
+  return success ? OPERATOR_FINISHED : OPERATOR_CANCELLED;
+}
+
+static void WM_OT_platform_url_open(wmOperatorType *ot)
+{
+  ot->name = "Open URL";
+  ot->idname = "WM_OT_platform_url_open";
+  ot->description = "Hand a URL to the browser the device has";
+
+  ot->exec = wm_platform_url_open_exec;
+
+  ot->flag = OPTYPE_INTERNAL;
+
+  RNA_def_string(ot->srna, "url", nullptr, 0, "URL", "URL to open");
+}
+
+/** \} */
+
+#endif /* __ANDROID__ */
+
 static void WM_OT_window_fullscreen_toggle(wmOperatorType *ot)
 {
   ot->name = "Toggle Window Fullscreen";
@@ -4357,6 +4406,9 @@ void wm_operatortypes_register()
   WM_operatortype_append(WM_OT_read_factory_userpref);
   WM_operatortype_append(WM_OT_window_fullscreen_toggle);
   WM_operatortype_append(WM_OT_virtual_keyboard_toggle);
+#ifdef __ANDROID__
+  WM_operatortype_append(WM_OT_platform_url_open);
+#endif
   WM_operatortype_append(WM_OT_quit_blender);
   WM_operatortype_append(WM_OT_open_mainfile);
   WM_operatortype_append(WM_OT_revert_mainfile);

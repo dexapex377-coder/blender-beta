@@ -57,6 +57,13 @@
 #include "interface_intern.hh"
 
 namespace blender::ui {
+#ifdef __ANDROID__
+  if (event->type == LEFTMOUSE) {
+    return event->val == KM_CLICK;
+  }
+#else
+  UNUSED_VARS(event);
+#endif
 
 /* -------------------------------------------------------------------- */
 /** \name Defines & Structs
@@ -2265,6 +2272,11 @@ static int panel_drag_collapse_handler(bContext *C, const wmEvent *event, void *
 
   return retval;
 }
+#ifdef __ANDROID__
+#  define PANEL_TOUCH_SCROLL true
+#else
+#  define PANEL_TOUCH_SCROLL false
+#endif
 
 void panel_drag_collapse_handler_add(const bContext *C, const bool was_open)
 {

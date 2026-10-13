@@ -74,6 +74,16 @@ struct UndoStack_Text;
 #define UI_MENU_SUBMENU_PADDING (6 * UI_SCALE_FAC)
 
 /* menu scrolling */
+#ifdef __ANDROID__
+/* Touch: the band at the top and bottom of an over-long menu. With a mouse it only has to be
+ * big enough to hover over, and it auto-scrolls on its own from there. A finger has to hit it
+ * deliberately and cannot hover at all, so it is doubled and made to respond to a tap. It is
+ * also what a drag has to start in front of, so a bigger band means fewer accidental item
+ * presses at the very edge. See ANDROID_TOUCH_UI_SCALE_STUDY.md. */
+#  define UI_MENU_SCROLL_ARROW (24 * UI_SCALE_FAC)
+#else
+#  define UI_MENU_SCROLL_ARROW (12 * UI_SCALE_FAC)
+#endif
 #define UI_MENU_SCROLL_ARROW (12 * UI_SCALE_FAC)
 #define UI_MENU_SCROLL_MOUSE (UI_MENU_SCROLL_ARROW + 2 * UI_SCALE_FAC)
 #define UI_MENU_SCROLL_PAD (4 * UI_SCALE_FAC)

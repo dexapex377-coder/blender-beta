@@ -1886,6 +1886,19 @@ ScrArea *ED_screen_state_toggle(bContext *C,
 ScrArea *ED_screen_temp_space_open(
     bContext *C, const char *title, eSpace_Type space_type, int display_type, bool dialog)
 {
+#ifdef __ANDROID__
+  /* Android hands out a single native window and its Vulkan surface is exclusive,
+   * so a second window can never present. The preference now defaults to a
+   * maximized area there (USER_TEMP_SPACE_DISPLAY_DEFAULT), which is what makes
+   * this the right thing to show rather than a silent override.
+   *
+   * It stays as a backstop for a preferences file that already stores "New
+   * Window", because the alternative locks the user out: opening the
+   * preferences would do nothing at all, and the preferences are the only place
+   * the setting can be changed back. */
+  display_type = USER_TEMP_SPACE_DISPLAY_FULLSCREEN;
+#endif
+
   switch (display_type) {
     case USER_TEMP_SPACE_DISPLAY_WINDOW:
       if (WM_window_open_temp(C, title, space_type, dialog)) {

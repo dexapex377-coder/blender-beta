@@ -76,7 +76,11 @@ enum class AreaDockTarget {
 /**
  * Expanded interaction influence of area borders.
  */
-#define BORDERPADDING (U.border_width * UI_SCALE_FAC + 3.0f * UI_SCALE_FAC)
+#ifdef __ANDROID__
+#  define BORDERPADDING ((U.border_width * UI_SCALE_FAC + 3.0f * UI_SCALE_FAC) * 1.5f)
+#else
+#  define BORDERPADDING (U.border_width * UI_SCALE_FAC + 3.0f * UI_SCALE_FAC)
+#endif
 
 /**
  * Number of pixels of the area border corner radius.
