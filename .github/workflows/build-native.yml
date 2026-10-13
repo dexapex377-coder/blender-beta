@@ -461,6 +461,16 @@ jobs:
           fi
           echo "OIDN static OK."
 
+      # The ninja tree is restored by prefix, so a CMake file that changed since the last
+      # successful build can still leave a stale build.ninja in place, and then cmake has no
+      # reason to reconfigure and the change never takes effect. CMake depends on CMakeLists.txt
+      # for this, so touching it forces the reconfigure. configure itself is about a minute; the
+      # object files are untouched and ninja still reuses them.
+      - name: Force CMake to reconfigure
+        run: |
+          touch CMakeLists.txt
+          echo "cmake will reconfigure on this run"
+
       - name: Configure CMake
         id: cmake-attempt1
         run: |
