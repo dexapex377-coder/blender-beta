@@ -603,6 +603,22 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+      # The staged Gradle project carries a *stripped* libblender.so:
+      # platform_android_stage.cmake runs llvm-strip --strip-unneeded on the way
+      # in. That leaves 14 exported symbols and no .symtab, so a tombstone frame
+      # resolves to "somewhere after ANativeActivity_onCreate" and a crash cannot
+      # be located. build/lib/libblender.so is the same file before that step, with
+      # its symbol table intact. Upload it alongside the BuildId so frames can be
+      # resolved with addr2line against the exact binary that crashed.
+      - name: Upload unstripped libblender.so for symbolization
+        if: steps.cmake-attempt1.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-symbols
+          path: build/lib/libblender.so
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4

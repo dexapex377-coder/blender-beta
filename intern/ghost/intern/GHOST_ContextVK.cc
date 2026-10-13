@@ -1059,10 +1059,10 @@ GHOST_TSuccess GHOST_ContextVK::swapBufferAcquire()
   if (swapchain_ != VK_NULL_HANDLE) {
     /* Some platforms (NVIDIA/Wayland) can receive an out of date swapchain when acquiring the next
      * swapchain image. Other do it when calling vkQueuePresent. */
+    /* Not SUBOPTIMAL: that image is acquired and usable, so re-acquiring would leak it.
+     * Requesting an IDENTITY preTransform on a rotated display makes it permanent. */
     VkResult acquire_result = VK_ERROR_OUT_OF_DATE_KHR;
-    while (swapchain_ != VK_NULL_HANDLE &&
-           (ELEM(acquire_result, VK_ERROR_OUT_OF_DATE_KHR, VK_SUBOPTIMAL_KHR)))
-    {
+    while (swapchain_ != VK_NULL_HANDLE && acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
       acquire_result = device_vk.functions.vkAcquireNextImageKHR(
           vk_device,
           swapchain_,
@@ -1070,7 +1070,7 @@ GHOST_TSuccess GHOST_ContextVK::swapBufferAcquire()
           submission_frame_data.acquire_semaphore,
           VK_NULL_HANDLE,
           &image_index);
-      if (ELEM(acquire_result, VK_ERROR_OUT_OF_DATE_KHR, VK_SUBOPTIMAL_KHR)) {
+      if (acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
         recreateSwapchain(use_hdr_swapchain);
       }
     }
@@ -1207,8 +1207,16 @@ GHOST_TSuccess GHOST_ContextVK::swapBufferRelease()
   }
   acquired_swapchain_image_index_.reset();
 
-  if (ELEM(present_result, VK_ERROR_OUT_OF_DATE_KHR, VK_SUBOPTIMAL_KHR)) {
+  /* SUBOPTIMAL presented correctly, so rebuilding on it costs a swapchain every frame:
+   * an IDENTITY preTransform on a rotated display reports it forever by design. */
+  if (present_result == VK_ERROR_OUT_OF_DATE_KHR) {
     recreateSwapchain(use_hdr_swapchain);
+    return GHOST_kSuccess;
+  }
+  if (present_result == VK_SUBOPTIMAL_KHR) {
+    /* The image was presented; the swap-chain is merely not an optimal match for the
+     * surface. Permanent when preTransform is IDENTITY on a rotated display, so this
+     * must not be reported as a failure once per frame. */
     return GHOST_kSuccess;
   }
   if (present_result != VK_SUCCESS) {
@@ -1624,7 +1632,14 @@ GHOST_TSuccess GHOST_ContextVK::recreateSwapchain(bool use_hdr_swapchain)
   create_info.imageArrayLayers = 1;
   create_info.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                            (use_hdr_swapchain ? VK_IMAGE_USAGE_STORAGE_BIT : 0);
-  create_info.preTransform = capabilities.currentTransform;
+  /* Blender does not pre-rotate its rendering, so requesting the surface's
+   * currentTransform (e.g. ROTATE_90 on portrait-native tablets) would show the
+   * UI sideways. Request IDENTITY when supported and let the display compositor
+   * apply the rotation. */
+  create_info.preTransform =
+      (capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) ?
+          VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR :
+          capabilities.currentTransform;
   /* Alpha lets the compositor blend the surface against the desktop, needed by CSD for rounded
    * window corners. Not all surfaces support it, so fall back to opaque in those cases. The caller
    * handles the lack of transparency by drawing square corners, see #GHOST_Context::hasAlpha. */
