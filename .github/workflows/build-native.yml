@@ -438,7 +438,14 @@ jobs:
         run: |
           set -o pipefail
           cd blender
-          LIBDIR="$GITHUB_WORKSPACE/blender_build_android/lib/android_arm64"
+          # build.sh reads LIBDIR and BUILD_BASE from the environment, and a bare
+          # assignment is not inherited by the child process, so both must be exported.
+          # Its default BUILD_BASE is "$(repo)/../blender_build_android"; the configure step
+          # in this workflow passes -DBUILD_BASE=${{ github.workspace }}/blender, so without
+          # this the build looks for TBB in a tree that does not exist and FindTBB.cmake
+          # fails with "Unable to find root directory .../lib/android_arm64/tbb".
+          export BUILD_BASE="$GITHUB_WORKSPACE/blender"
+          export LIBDIR="$BUILD_BASE/lib/android_arm64"
           echo "=== Removing prebuilt SHARED OIDN (replaced by static .a) ==="
           rm -rf "$LIBDIR/openimagedenoise"
           echo "=== Building ISPC (host tool) + OIDN static ==="
