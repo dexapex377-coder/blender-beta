@@ -405,6 +405,31 @@ struct GHOST_InstanceVK {
 
   bool create_instance(uint32_t vulkan_api_version)
   {
+    /* Ask the loader for the highest version it knows, but never past 1.3.
+     *
+     * vkGetDeviceProcAddr returns nothing for core commands newer than the version
+     * declared here, whatever the physical device supports: asking for 1.2 left
+     * vkCmdBeginRendering null on a 1.3 device, so dynamic rendering could not be used
+     * on exactly the devices that have it in core. Extensions are unaffected, which is
+     * why the KHR path on older devices never showed this.
+     *
+     * Capped at 1.3 rather than taken as-is because the instance version also decides
+     * what SPIR-V the shader generator is allowed to emit. A 1.4/1.5 request asks for
+     * SPIR-V beyond what the device's shader compiler accepts, and Eevee dies in the
+     * compile rather than at any Vulkan call, so the failure looks unrelated to Vulkan.
+     * 1.3 is the newest that every driver in this tree can consume. */
+    uint32_t loader_api_version = VK_API_VERSION_1_0;
+    if (volk::vkEnumerateInstanceVersion != nullptr &&
+        volk::vkEnumerateInstanceVersion(&loader_api_version) == VK_SUCCESS)
+    {
+      const uint32_t highest_known = loader_api_version < uint32_t(VK_API_VERSION_1_3) ?
+                                         loader_api_version :
+                                         uint32_t(VK_API_VERSION_1_3);
+      if (highest_known > vulkan_api_version) {
+        vulkan_api_version = highest_known;
+      }
+    }
+
     VkApplicationInfo vk_application_info = {VK_STRUCTURE_TYPE_APPLICATION_INFO,
                                              nullptr,
                                              "Blender",
