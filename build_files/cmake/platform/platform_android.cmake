@@ -317,11 +317,12 @@ if(WITH_OPENIMAGEDENOISE)
   find_package(OpenImageDenoise CONFIG REQUIRED)
   set(OPENIMAGEDENOISE_INCLUDE_DIRS ${LIBDIR}/openimagedenoise/include)
   # OIDN's static build splits into libOpenImageDenoise.a plus separate _core and
-  # _device_cpu archives. find_package(CONFIG) carries the API archive onto the link
-  # line but not the other two, and the link then fails with undefined oidn::Context
-  # or oidn::Device symbols -- reported against api.cpp.o in the archive, which makes
-  # the error look like the archive is wrong rather than incomplete. Name them
-  # explicitly, in the order the linker needs.
+  # _device_cpu archives. They end up on the link line ahead of the archive that
+  # needs them -- libcycles_kernel_cpu.a comes after them -- and ld.lld resolves
+  # forward, so oidn::Context and oidn::Device stay undefined. Naming them was not
+  # enough; the position was the problem. Wrapped in a group so the order inside it
+  # stops mattering.
+  set(OPENIMAGEDENOISE_LIBRARIES "-Wl,--start-group")
   foreach(_oidn_archive
       ${LIBDIR}/openimagedenoise/lib/libOpenImageDenoise.a
       ${LIBDIR}/openimagedenoise/lib/libOpenImageDenoise_core.a
@@ -330,6 +331,7 @@ if(WITH_OPENIMAGEDENOISE)
       list(APPEND OPENIMAGEDENOISE_LIBRARIES ${_oidn_archive})
     endif()
   endforeach()
+  list(APPEND OPENIMAGEDENOISE_LIBRARIES "-Wl,--end-group")
   set(OPENIMAGEDENOISE_FOUND ON)
 endif()
 
