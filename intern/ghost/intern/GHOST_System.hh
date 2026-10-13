@@ -83,6 +83,21 @@ class GHOST_System : public GHOST_ISystem {
 
   bool window_focus_;
 
+  /* Inline rather than declared-and-defined-in-the-.cc: they are overrides of the
+   * GHOST_ISystem virtuals, so a definition has to match a declaration here, and the
+   * base implementations are one line each. Backends with a soft keyboard override
+   * them; everything else keeps failing, meaning "nothing to show". */
+  /** \copydoc #GHOST_ISystem::popupOnScreenKeyboard */
+  GHOST_TSuccess popupOnScreenKeyboard(GHOST_IWindow * /*window*/) override
+  {
+    return GHOST_kFailure;
+  }
+  /** \copydoc #GHOST_ISystem::hideOnScreenKeyboard */
+  GHOST_TSuccess hideOnScreenKeyboard(GHOST_IWindow * /*window*/) override
+  {
+    return GHOST_kFailure;
+  }
+
   /** \copydoc #GHOST_ISystem::setAutoFocus */
   void setAutoFocus(const bool auto_focus) override;
   bool auto_focus_;
