@@ -112,7 +112,28 @@ TimelineValue VKDevice::render_graph_submit(render_graph::VKRenderGraph *render_
 
   if (wait_for_submission) {
     std::unique_lock<Mutex> lock(wait_condition.is_submitted_mutex);
-    wait_condition.is_submitted_condition.wait(lock, [&] { return wait_condition.is_submitted; });
+    /* Sliced for the same reason wait_for_timeline() is: an unbounded wait turns a missed
+     * wakeup into a process that is frozen rather than broken, and nothing is reported. That
+     * is what Eevee does on this device -- the main thread sleeps here with no error, no CPU,
+     * and no "Compiling EEVEE engine shaders" ever resolving. A missed notify should be
+     * visible, not a hang. */
+    for (int attempt = 0; !wait_condition.is_submitted; attempt++) {
+      const std::cv_status status =
+          wait_condition.is_submitted_condition.wait_for(lock, std::chrono::seconds(2));
+      if (wait_condition.is_submitted) {
+        break;
+      }
+      VKSUBLOG("submit wait STUCK timeline=%llu attempt=%d res=%d",
+               (unsigned long long)timeline,
+               attempt,
+               int(status));
+      if (attempt + 1 >= 5) {
+        CLOG_ERROR(&LOG,
+                   "Vulkan: submission %llu was never handed to the device (waited 10s).",
+                   (unsigned long long)timeline);
+        break;
+      }
+    }
   }
 
   if (wait_for_completion) {
