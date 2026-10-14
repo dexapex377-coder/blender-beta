@@ -142,7 +142,19 @@ ScrArea *render_view_open(bContext *C, int mx, int my, ReportList *reports)
     return nullptr;
   }
 
-  if (U.render_display_type == USER_RENDER_DISPLAY_WINDOW) {
+  eUserpref_RenderDisplayType render_display_type = U.render_display_type;
+#ifdef __ANDROID__
+  /* Android hands out one native window whose Vulkan surface is exclusive, so a second window
+   * can never present. WM_window_open() below returns null for exactly that reason, which
+   * surfaced as "Failed to open window!" and no render result at all.
+   *
+   * This is the same reason ED_screen_temp_space_open() forces the fullscreen area for
+   * Preferences; that fix is on a different call path and did not reach here. USER_RENDER_DISPLAY_SCREEN
+   * reuses the current area instead, which is what actually works on a phone. */
+  render_display_type = USER_RENDER_DISPLAY_SCREEN;
+#endif
+
+  if (render_display_type == USER_RENDER_DISPLAY_WINDOW) {
     int sizex, sizey;
     BKE_render_resolution(&scene->r, false, &sizex, &sizey);
 
@@ -198,7 +210,7 @@ ScrArea *render_view_open(bContext *C, int mx, int my, ReportList *reports)
       sima->flag |= SI_PREVSPACE;
     }
   }
-  else if (U.render_display_type == USER_RENDER_DISPLAY_SCREEN) {
+  else if (render_display_type == USER_RENDER_DISPLAY_SCREEN) {
     area = CTX_wm_area(C);
 
     /* If the active screen is already in full-screen mode, skip this and
