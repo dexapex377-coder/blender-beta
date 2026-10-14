@@ -4916,25 +4916,29 @@ static bool wm_android_knobs_reload_poll(bContext * /*C*/)
   return true;
 }
 
-static int wm_android_knobs_reload_exec(bContext * /*C*/)
+static wmOperatorStatus wm_android_knobs_reload_exec(bContext * /*C*/)
 {
   BLI_android_knobs_reload();
   const std::string dump = BLI_android_knobs_dump();
   const size_t count = size_t(std::count(dump.begin(), dump.end(), '\n'));
-  CLOG_INFO(LOG_BLEND,
-            "Android switches reloaded from %s, %zu set",
-            BLI_ANDROID_KNOBS_FILE,
-            count);
+  /* printf rather than CLOG_INFO: LOG_BLEND is a logref declared in eevee, and
+   * the one thing worth more than a switch that can be flipped without a build
+   * is a line that reaches the device. printf goes through the redirected
+   * stdout into logcat, which is where a capture is taken from. */
+  printf("Android switches reloaded from %s, %zu set\n",
+         BLI_ANDROID_KNOBS_FILE,
+         count);
   size_t start = 0;
   while (start < dump.size()) {
     const size_t end = dump.find('\n', start);
     if (end == std::string::npos) {
       break;
     }
-    CLOG_INFO(LOG_BLEND, "  %s", dump.substr(start, end - start).c_str());
+    printf("  %s\n", dump.substr(start, end - start).c_str());
     start = end + 1;
   }
-  return 1;
+  fflush(stdout);
+  return OPERATOR_FINISHED;
 }
 
 void WM_OT_android_knobs_reload(wmOperatorType *ot)
