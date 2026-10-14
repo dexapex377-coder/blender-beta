@@ -465,7 +465,14 @@ if(WITH_EMBREE)
 endif()
 add_bundled_libraries(embree/lib)
 
-if(WITH_OPENIMAGEDENOISE)
+# Android is excluded on purpose. It is built with OIDN_STATIC_LIB, which splits the
+# denoiser into libOpenImageDenoise{,_core,_device_cpu}.a, and platform_android.cmake
+# (included just above this file) has already put the full set plus the --start-group
+# that makes their order irrelevant into OPENIMAGEDENOISE_LIBRARIES.
+# FindOpenImageDenoise.cmake looks for one shared library and, finding none, settles
+# for the API-only libOpenImageDenoise.a -- running it here replaced that list and the
+# link died on oidn::Context::get() and the rest of core.
+if(WITH_OPENIMAGEDENOISE AND NOT TARGET_ANDROID)
   find_package_wrapper(OpenImageDenoise)
   set_and_warn_library_found("OpenImageDenoise" OPENIMAGEDENOISE_FOUND WITH_OPENIMAGEDENOISE)
   add_bundled_libraries(openimagedenoise/lib)

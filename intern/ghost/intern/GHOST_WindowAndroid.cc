@@ -17,6 +17,11 @@
 
 #include <android/log.h>
 #include <android/native_window.h>
+#include <dlfcn.h>
+#include <sys/system_properties.h>
+
+#include <algorithm>
+#include <cstdlib>
 
 /**
  * Shrink the buffers the window renders into; the display scales them back up. Every render
@@ -47,6 +52,64 @@ static void ghost_android_apply_render_scale(ANativeWindow *native_window)
                       divisor);
 }
 
+/**
+ * Ask the compositor for a frame rate above the display default.
+ *
+ * A SurfaceFlinger layer defaults to 60 Hz unless something requests more, so Blender would
+ * be capped there even though the panel runs at 90 or 120. `ANativeWindow_setFrameRate` is
+ * not in the NDK headers, hence the dlsym; it exists from Android 11 and the lookup is
+ * allowed to fail -- a device without it simply stays at its default.
+ *
+ * Rate is read from the `debug.blender.refresh` system property so it can be retuned
+ * without a rebuild; 0 turns the request off.
+ */
+static void ghost_android_apply_refresh_rate(ANativeWindow *native_window)
+{
+  if (native_window == nullptr) {
+    return;
+  }
+
+  char value[PROP_VALUE_MAX] = {};
+  int hz = 90;
+  if (__system_property_get("debug.blender.refresh", value) > 0 && value[0] != '\0') {
+    hz = atoi(value);
+  }
+  if (hz <= 0) {
+    __android_log_print(
+        ANDROID_LOG_INFO, "blender-refresh", "refresh rate request disabled (prop 0)");
+    return;
+  }
+  hz = std::min(hz, 120);
+
+  typedef int32_t (*ANativeWindowSetFrameRateFn)(ANativeWindow *, float, int8_t);
+  static const ANativeWindowSetFrameRateFn set_frame_rate = []() -> ANativeWindowSetFrameRateFn {
+    void *libnativewindow = dlopen("libnativewindow.so", RTLD_LAZY);
+    if (libnativewindow == nullptr) {
+      __android_log_print(ANDROID_LOG_INFO,
+                          "blender-refresh",
+                          "dlopen libnativewindow.so failed: %s",
+                          dlerror());
+      return nullptr;
+    }
+    return reinterpret_cast<ANativeWindowSetFrameRateFn>(
+        dlsym(libnativewindow, "ANativeWindow_setFrameRate"));
+  }();
+  if (set_frame_rate == nullptr) {
+    __android_log_print(ANDROID_LOG_INFO,
+                        "blender-refresh",
+                        "ANativeWindow_setFrameRate not found at runtime, skipping");
+    return;
+  }
+
+  const int32_t result = set_frame_rate(
+      native_window, float(hz), ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT);
+  __android_log_print(ANDROID_LOG_INFO,
+                      "blender-refresh",
+                      "setFrameRate(%d Hz) -> %s",
+                      hz,
+                      (result == 0) ? "ok" : "failed");
+}
+
 GHOST_WindowAndroid::GHOST_WindowAndroid(GHOST_SystemAndroid *system,
                                          ANativeWindow *native_window,
                                          const char *title,
@@ -63,6 +126,7 @@ GHOST_WindowAndroid::GHOST_WindowAndroid(GHOST_SystemAndroid *system,
   if (native_window_) {
     ANativeWindow_acquire(native_window_);
     ghost_android_apply_render_scale(native_window_);
+    ghost_android_apply_refresh_rate(native_window_);
   }
   setDrawingContextType(type);
 }
@@ -90,6 +154,7 @@ void GHOST_WindowAndroid::setNativeWindow(ANativeWindow *native_window)
   if (native_window_) {
     ANativeWindow_acquire(native_window_);
     ghost_android_apply_render_scale(native_window_);
+    ghost_android_apply_refresh_rate(native_window_);
   }
 
 #ifdef WITH_VULKAN_BACKEND

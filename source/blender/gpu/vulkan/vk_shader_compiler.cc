@@ -23,6 +23,11 @@
 #include <iostream>
 #include <string>
 
+#ifdef __ANDROID__
+#  include <cstdlib>
+#  include <sys/system_properties.h>
+#endif
+
 #include "CLG_log.h"
 
 #include "spirv/unified1/spirv.h"
@@ -44,6 +49,11 @@ static std::optional<std::string> cache_dir_get()
     /* Shader builder doesn't return the correct appdir. */
     BKE_appdir_folder_caches(tmp_dir_buffer, sizeof(tmp_dir_buffer));
 
+    /* kronos3D tags this directory with the Vulkan/SPIR-V target ("vk-spirv-cache-vk13").
+     * Not done here: read_spirv_from_disk() below already compares the SPIR-V version stored
+     * in each entry's sidecar against spirv_target_version_get() and recompiles on a
+     * mismatch, so a stale module is never reused either way. The tag would only leave a
+     * second, equally large cache behind on a device that has little disk to spare. */
     std::string cache_dir = std::string(tmp_dir_buffer) + "vk-spirv-cache" + SEP_STR;
     BLI_dir_create_recursive(cache_dir.c_str());
     return cache_dir;
@@ -79,8 +89,39 @@ static uint32_t spirv_target_version_get()
    * Blender asks for no SPIR-V 1.4 feature, so the older target costs nothing.
    *
    * Note this is a property of the shader compiler, not of the Vulkan instance version: the
-   * instance may declare 1.3 (SPIR-V 1.6) and the generator still has to emit 1.3 here. */
-  return shaderc_spirv_version_1_3;
+   * instance may declare 1.3 (SPIR-V 1.6) and the generator still has to emit 1.3 here.
+   *
+   * `debug.blender.spirv` overrides it, so a driver that turns out to want something else can
+   * be retried without a rebuild: "10".."16", or "default" to go back to 1.3. The cached
+   * sidecar records whichever version was used, so changing it recompiles. */
+  {
+    char value[PROP_VALUE_MAX] = {};
+    if (__system_property_get("debug.blender.spirv", value) > 0 && value[0] != '\0') {
+      if (strcmp(value, "default") == 0) {
+        return shaderc_spirv_version_1_3;
+      }
+      const int minor = atoi(value);
+      switch (minor) {
+        case 0:
+          return shaderc_spirv_version_1_0;
+        case 1:
+          return shaderc_spirv_version_1_1;
+        case 2:
+          return shaderc_spirv_version_1_2;
+        case 3:
+          return shaderc_spirv_version_1_3;
+        case 4:
+          return shaderc_spirv_version_1_4;
+        case 5:
+          return shaderc_spirv_version_1_5;
+        case 6:
+          return shaderc_spirv_version_1_6;
+        default:
+          break;
+      }
+    }
+    return shaderc_spirv_version_1_3;
+  }
 #else
   const VKDevice &device = VKBackend::get().device;
   return device.extensions_get().spirv_1_4 ? shaderc_spirv_version_1_4 : shaderc_spirv_version_1_3;
@@ -379,7 +420,13 @@ static bool compile_ex(shaderc::Compiler &compiler,
   bool do_optimize = true;
   if (VKBackend::get().device.extensions_get().spirv_1_4) {
     options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_2);
-    options.SetTargetSpirv(shaderc_spirv_version_1_4);
+    /* Must come from spirv_target_version_get(), which is where the Android pin to 1.3
+     * lives. This used to be a literal shaderc_spirv_version_1_4, so the pin was dead code:
+     * it only ever reached the sidecar tag written next to the module, and every device that
+     * advertises spirv_1_4 -- which the PowerVR here does -- still got 1.4 modules generated.
+     * That is the version Eevee's shadow and light-culling pipelines crash on, and it is why
+     * the sidecar and the binary used to disagree about what was in the file. */
+    options.SetTargetSpirv(spirv_target_version_get());
   }
   else {
     options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1);

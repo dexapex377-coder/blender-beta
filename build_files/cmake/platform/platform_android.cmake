@@ -316,23 +316,29 @@ if(WITH_OPENIMAGEDENOISE)
   # variables the rest of the build reads.
   find_package(OpenImageDenoise CONFIG REQUIRED)
   set(OPENIMAGEDENOISE_INCLUDE_DIRS ${LIBDIR}/openimagedenoise/include)
-  # OIDN's static build splits into libOpenImageDenoise.a plus separate _core and
-  # _device_cpu archives. They end up on the link line ahead of the archive that
-  # needs them -- libcycles_kernel_cpu.a comes after them -- and ld.lld resolves
-  # forward, so oidn::Context and oidn::Device stay undefined. Naming them was not
-  # enough; the position was the problem. Wrapped in a group so the order inside it
-  # stops mattering.
+  # OIDN's static build splits into libOpenImageDenoise.a (the C/C++ API only, ~1.5 MB)
+  # plus separate _core and _device_cpu archives that the API archive calls into.
+  # Those three are the whole denoiser, so a missing one is a build-tree problem and is
+  # fatal here rather than a mysterious "undefined symbol: oidn::Context::get()" at
+  # link time -- an earlier revision skipped absent archives silently and that is
+  # exactly what it looked like when it went wrong.
   set(OPENIMAGEDENOISE_LIBRARIES "-Wl,--start-group")
-  foreach(_oidn_archive
-      ${LIBDIR}/openimagedenoise/lib/libOpenImageDenoise.a
-      ${LIBDIR}/openimagedenoise/lib/libOpenImageDenoise_core.a
-      ${LIBDIR}/openimagedenoise/lib/libOpenImageDenoise_device_cpu.a)
-    if(EXISTS ${_oidn_archive})
-      list(APPEND OPENIMAGEDENOISE_LIBRARIES ${_oidn_archive})
+  foreach(_oidn_name
+      libOpenImageDenoise.a
+      libOpenImageDenoise_core.a
+      libOpenImageDenoise_device_cpu.a)
+    set(_oidn_archive ${LIBDIR}/openimagedenoise/lib/${_oidn_name})
+    if(NOT EXISTS ${_oidn_archive})
+      message(FATAL_ERROR "OIDN static archive missing: ${_oidn_archive}\n"
+        "Build it first: build_files/android/deps/build.sh oidn")
     endif()
+    list(APPEND OPENIMAGEDENOISE_LIBRARIES ${_oidn_archive})
   endforeach()
   list(APPEND OPENIMAGEDENOISE_LIBRARIES "-Wl,--end-group")
+  # The group is there because these archives sit ahead of the one that references them
+  # (libcycles_kernel_cpu.a comes later) and ld.lld only resolves backwards.
   set(OPENIMAGEDENOISE_FOUND ON)
+  message(STATUS "OIDN static: ${OPENIMAGEDENOISE_LIBRARIES}")
 endif()
 
 if(WITH_LLVM)

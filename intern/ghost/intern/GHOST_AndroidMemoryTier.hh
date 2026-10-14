@@ -42,7 +42,12 @@ inline bool GHOST_android_is_low_memory_device()
   return is_low_memory;
 }
 
-/** Divisor applied to the native window size. 1 = native, 2 = half resolution. */
+/** Divisor applied to the native window size. 1 = native, 2 = half resolution.
+ *
+ * The default is native resolution, which is what kronos3D does; a phone that really cannot
+ * afford full-resolution targets is a per-device problem, so it is a property rather than a
+ * guess made from the RAM size. `setprop debug.blender.renderdiv 2` halves it (4 is the
+ * maximum), 0 disables the request and leaves the default. */
 inline uint32_t GHOST_android_render_scale_divisor()
 {
   static const uint32_t divisor = []() -> uint32_t {
@@ -53,7 +58,7 @@ inline uint32_t GHOST_android_render_scale_divisor()
         return uint32_t(v);
       }
     }
-    return GHOST_android_is_low_memory_device() ? 2 : 1;
+    return 1;
   }();
   return divisor;
 }

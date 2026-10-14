@@ -1408,10 +1408,20 @@ static GHOST_TSuccess selectPresentMode(const GHOST_TVSyncModes vsync,
   /* TODO: select the correct presentation mode based on the actual being performed by the user.
    * When low latency is required (paint cursor) we should select mailbox, otherwise we can do FIFO
    * to reduce CPU/GPU usage. */
-  for (const VkPresentModeKHR present_mode : presents) {
-    if (present_mode == VK_PRESENT_MODE_MAILBOX_KHR) {
-      *r_presentMode = present_mode;
-      return GHOST_kSuccess;
+#ifdef __ANDROID__
+  /* MAILBOX needs a third full-screen swapchain image (see the image count below), which is
+   * exactly what a phone with little RAM cannot spare, so on those it is skipped and FIFO is
+   * used instead. */
+  const bool prefer_double_buffering = GHOST_android_is_low_memory_device();
+#else
+  const bool prefer_double_buffering = false;
+#endif
+  if (!prefer_double_buffering) {
+    for (const VkPresentModeKHR present_mode : presents) {
+      if (present_mode == VK_PRESENT_MODE_MAILBOX_KHR) {
+        *r_presentMode = present_mode;
+        return GHOST_kSuccess;
+      }
     }
   }
 
