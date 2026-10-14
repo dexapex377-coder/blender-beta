@@ -4916,7 +4916,7 @@ static bool wm_android_knobs_reload_poll(bContext * /*C*/)
   return true;
 }
 
-static wmOperatorStatus wm_android_knobs_reload_exec(bContext * /*C*/)
+static wmOperatorStatus wm_android_knobs_reload_exec(bContext * /*C*/, wmOperator * /*op*/)
 {
   BLI_android_knobs_reload();
   const std::string dump = BLI_android_knobs_dump();
