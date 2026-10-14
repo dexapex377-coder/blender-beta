@@ -15,6 +15,7 @@
 
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
+#include "DNA_screen_types.h"
 #include "DNA_userdef_types.h"
 
 #include "BLI_listbase.hh"
@@ -1294,6 +1295,33 @@ static void screen_global_topbar_area_refresh(wmWindow *win, bScreen *screen)
       win, screen, SPACE_TOPBAR, GLOBAL_AREA_ALIGN_TOP, &rect, size, size, size);
 }
 
+/* Ensure an existing status bar has its left header region.
+ *
+ * statusbar_create() makes two -- one for the on-screen keyboard button, pinned to the left, and
+ * one for the figures, which scroll -- but it only runs when the area is made from nothing.
+ * Global areas are written into the file by the window manager (see wm.cc,
+ * BKE_screen_area_map_blend_write) and the bundled startup.blend was saved before the split
+ * existed, so every launch restored a bar with one region and the create() code never ran at
+ * all. The keyboard button scrolled away with the figures, and no amount of reading
+ * statusbar_create() showed why.
+ *
+ * So the region is ensured here instead, on the path that runs for a restored area as well as a
+ * new one, and before ED_area_init() measures the rects. It is idempotent: a bar that already has
+ * a left-aligned header is left alone. */
+static void screen_global_statusbar_area_ensure_regions(ScrArea *area)
+{
+  for (const ARegion &region : area->regionbase) {
+    if (RGN_ALIGN_ENUM_FROM_MASK(region.alignment) == RGN_ALIGN_LEFT) {
+      return;
+    }
+  }
+
+  ARegion *region = BKE_area_region_new();
+  BLI_addhead(&area->regionbase, region);
+  region->regiontype = RGN_TYPE_HEADER;
+  region->alignment = RGN_ALIGN_LEFT;
+}
+
 static void screen_global_statusbar_area_refresh(wmWindow *win, bScreen *screen)
 {
   const short size_min = 1;
@@ -1305,6 +1333,13 @@ static void screen_global_statusbar_area_refresh(wmWindow *win, bScreen *screen)
   WM_window_rect_calc(win, &rect);
   rect.xmax -= 1;
   rect.ymax = rect.ymin + size_max;
+
+  for (ScrArea &area : win->global_areas.areabase) {
+    if (area.spacetype == SPACE_STATUSBAR) {
+      screen_global_statusbar_area_ensure_regions(&area);
+      break;
+    }
+  }
 
   screen_global_area_refresh(
       win, screen, SPACE_STATUSBAR, GLOBAL_AREA_ALIGN_BOTTOM, &rect, size, size_min, size_max);
