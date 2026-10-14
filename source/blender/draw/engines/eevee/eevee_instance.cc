@@ -26,6 +26,7 @@
 #include "DNA_camera_types.h"
 #include "DNA_lightprobe_types.h"
 #include "DNA_modifier_types.h"
+#include "DNA_scene_types.h"
 
 #include "ED_screen.hh"
 #include "ED_view3d.hh"
@@ -752,10 +753,44 @@ void Instance::draw_viewport()
   if (skip_render_ || !is_loaded(needed_shaders)) {
     DefaultFramebufferList *dfbl = draw_ctx->viewport_framebuffer_list_get();
     GPU_framebuffer_clear_color_depth(dfbl->default_fb, double4(0.0), 1.0f);
-    if (!is_loaded(needed_shaders & ~WORLD_SHADERS)) {
+    const bool non_shadow_loaded = is_loaded(needed_shaders & ~WORLD_SHADERS);
+    if (!non_shadow_loaded) {
       info_append_i18n("Compiling EEVEE engine shaders");
       DRW_viewport_request_redraw();
     }
+#ifdef __ANDROID__
+    /* Android watchdog: the shadow system is compute-only and on some mobile drivers it never
+     * finishes loading. Measured on a PowerVR B-Series: every shadow shader arrives from the
+     * cache and none fails to compile, 291 of them, and then nothing is presented again --
+     * frames of 60s, the ANR only appearing once a finger arrives with an unconsumed
+     * MotionEvent, and no watchdog on the Vulkan submission or timeline waits firing, because
+     * the main thread is asleep inside a driver call rather than in a wait we own.
+     *
+     * So it is timed from here instead, where we can see that the only shaders still pending
+     * are the shadow ones. That turns an unrecoverable freeze into one slow first frame, and
+     * the scene keeps working -- Eevee on this device renders at about a frame a second
+     * without shadows, which is the point of the floor.
+     *
+     * Deliberately generous. A cold cache on a slow phone still has to compile shaders, and
+     * cutting that off early would disable shadows on hardware that only needed patience. */
+    if (!skip_render_ && !is_loaded(needed_shaders) && non_shadow_loaded) {
+      if (shadow_compile_start_ == 0.0) {
+        shadow_compile_start_ = BLI_time_now_seconds();
+        CLOG_INFO(&Instance::log, "Android: waiting on EEVEE shadow shaders.");
+      }
+      else if (BLI_time_now_seconds() - shadow_compile_start_ > 20.0) {
+        scene->eevee.flag &= ~SCE_EEVEE_SHADOW_ENABLED;
+        shadow_compile_start_ = 0.0;
+        CLOG_ERROR(&Instance::log,
+                   "Android: EEVEE shadow shaders never finished loading. They are compute "
+                   "only and this driver is not getting there. Shadows are off for this "
+                   "session; everything else renders.");
+      }
+    }
+    else if (shadow_compile_start_ != 0.0 && is_loaded(needed_shaders)) {
+      shadow_compile_start_ = 0.0;
+    }
+#endif
     /* Do not swap if the velocity module didn't go through a full sync cycle. */
     if (!is_loaded(needed_shaders)) {
       /* The velocity module can reference some gpu::Batch. Calling this function

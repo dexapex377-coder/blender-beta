@@ -105,6 +105,10 @@ class Instance : public DrawEngine {
   bool overlays_enabled_ = false;
   bool skip_render_ = false;
 
+  /** Android only: when the first shadow shaders start loading, so the watchdog in
+   * draw_viewport() can tell a slow first compile from one that never finishes. */
+  double shadow_compile_start_ = 0.0;
+
   /** Info string displayed at the top of the render / viewport, or the console when baking. */
   std::string info_ = "";
 
