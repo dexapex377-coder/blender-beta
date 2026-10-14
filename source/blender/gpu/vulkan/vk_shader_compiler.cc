@@ -10,6 +10,7 @@
 
 #include "BLI_fileops.hh"
 #include "BLI_path_utils.hh"
+#include "BLI_time.hh"
 #ifdef _WIN32
 #  include "BLI_winstuff.hh"
 #endif
@@ -24,8 +25,36 @@
 #include <string>
 
 #ifdef __ANDROID__
+#  include <android/log.h>
+#  include <cstdarg>
 #  include <cstdlib>
 #  include <sys/system_properties.h>
+#endif
+
+/** Per-shader compile tracing, so it is off unless `debug.blender.shaderlog` is set.
+ *
+ * The question this answers is which shaders come off the disk cache and which have to go
+ * through shaderc, and how long each of those takes. On a phone the answer decides whether
+ * Eevee is merely slow to start or never starts at all, and the two look identical from the
+ * outside: both leave "Compiling EEVEE engine shaders" on screen. */
+#ifdef __ANDROID__
+static void shader_compile_log(const char *format, ...)
+{
+  static const bool enabled = []() {
+    char value[PROP_VALUE_MAX] = {};
+    return __system_property_get("debug.blender.shaderlog", value) > 0 && atoi(value) != 0;
+  }();
+  if (!enabled) {
+    return;
+  }
+  va_list args;
+  va_start(args, format);
+  __android_log_vprint(ANDROID_LOG_INFO, "blender-shader", format, args);
+  va_end(args);
+}
+#  define SHADERLOG(...) shader_compile_log(__VA_ARGS__)
+#else
+#  define SHADERLOG(...) ((void)0)
 #endif
 
 #include "CLG_log.h"
@@ -415,8 +444,11 @@ static bool compile_ex(shaderc::Compiler &compiler,
   const std::string hash_extra = std::string("op_string:") + full_name;
 
   if (read_spirv_from_disk(shader_module, hash_extra)) {
+    SHADERLOG("CACHE  %-44s spirv=%u", full_name.c_str(), unsigned(spirv_target_version_get()));
     return true;
   }
+
+  const double compile_t0 = BLI_time_now_seconds();
 
   shaderc::CompileOptions options;
   bool do_optimize = true;
@@ -474,6 +506,26 @@ static bool compile_ex(shaderc::Compiler &compiler,
       sources, stage, full_name.c_str(), options);
   bool compilation_succeeded = shader_module.compilation_result.GetCompilationStatus() ==
                                shaderc_compilation_status_success;
+  SHADERLOG("%s %-44s spirv=%u opt=%d %.0f ms",
+            compilation_succeeded ? "BUILD " : "FAIL  ",
+            full_name.c_str(),
+            unsigned(spirv_target_version_get()),
+            int(do_optimize),
+            (BLI_time_now_seconds() - compile_t0) * 1000.0f);
+  if (!compilation_succeeded) {
+    /* This is the only place a shader failure is visible without a debugger: Blender reports
+     * "Could not compile shader" to the UI and otherwise says nothing about why. */
+    const char *error_message = shader_module.compilation_result.GetErrorMessage();
+    if (error_message != nullptr) {
+      std::string one_line(error_message);
+      for (char &c : one_line) {
+        if (c == '\n' || c == '\r') {
+          c = ' ';
+        }
+      }
+      SHADERLOG("      error: %s", one_line.c_str());
+    }
+  }
   if (compilation_succeeded) {
     /* Copy the compiled SPIR-V code into spirv_binary so it can be post-processed.
      * The function VKShaderModule::finalize prefers spirv_binary when it is not empty. */

@@ -194,6 +194,16 @@ class VKDevice : public NonCopyable {
   std::atomic<bool> submission_thread_should_exit_ = false;
 
   /**
+   * Latched when the GPU stops executing work, so that waiters stop waiting for a timeline that
+   * will never be signalled. See wait_for_timeline() and the submit loop.
+   */
+  std::atomic<bool> device_lost_ = false;
+  bool is_device_lost() const
+  {
+    return device_lost_.load(std::memory_order_relaxed);
+  }
+
+  /**
    * All created render graphs.
    */
   Vector<render_graph::VKRenderGraph *> render_graphs_;
