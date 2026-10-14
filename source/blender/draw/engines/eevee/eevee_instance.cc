@@ -766,14 +766,18 @@ void Instance::draw_viewport()
      * MotionEvent, and no watchdog on the Vulkan submission or timeline waits firing, because
      * the main thread is asleep inside a driver call rather than in a wait we own.
      *
-     * So it is timed from here instead, where we can see that the only shaders still pending
-     * are the shadow ones. That turns an unrecoverable freeze into one slow first frame, and
-     * the scene keeps working -- Eevee on this device renders at about a frame a second
-     * without shadows, which is the point of the floor.
+     * So it is timed from here instead: Eevee is waiting on shaders, and shadows are on.
+     * Deliberately not conditioned on which shaders are pending -- the first version was, on
+     * the reasoning that only the shadow ones would be outstanding, and it never armed. With
+     * shadows enabled the whole engine stops instead: 291 shaders load where 445 load
+     * without them, so the non-shadow subset is not ready either and the condition never
+     * held. Which subset is pending is not the question; whether it ever finishes is.
      *
      * Deliberately generous. A cold cache on a slow phone still has to compile shaders, and
      * cutting that off early would disable shadows on hardware that only needed patience. */
-    if (!skip_render_ && !is_loaded(needed_shaders) && non_shadow_loaded) {
+    if (!skip_render_ && !is_loaded(needed_shaders) &&
+        (scene->eevee.flag & SCE_EEVEE_SHADOW_ENABLED))
+    {
       if (shadow_compile_start_ == 0.0) {
         shadow_compile_start_ = BLI_time_now_seconds();
         CLOG_INFO(&Instance::log, "Android: waiting on EEVEE shadow shaders.");
