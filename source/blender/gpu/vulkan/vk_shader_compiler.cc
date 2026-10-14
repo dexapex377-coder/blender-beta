@@ -73,7 +73,9 @@ struct SPIRVSidecar {
   uint32_t spirv_version;
 };
 
-static uint32_t spirv_target_version_get()
+/* shaderc_spirv_version, not uint32_t: this is handed straight to SetTargetSpirv(). The sidecar
+ * stores the result in a uint32_t, where the enum converts implicitly. */
+static shaderc_spirv_version spirv_target_version_get()
 {
 #ifdef __ANDROID__
   /* Ask for SPIR-V 1.3 on Android whatever the device advertises.
