@@ -4896,10 +4896,15 @@ const EnumPropertyItem *RNA_mask_local_itemf(bContext *C,
 
 #ifdef __ANDROID__
 
+/* Included here, at global scope, before the namespace opens again below: these
+ * pull in <map>, <string> and the C standard library, and being inside
+ * namespace blender would make libc++ resolve std:: to blender::std. */
 #  include "BLI_android_knobs.hh"
 
 #  include <algorithm>
 #  include <string>
+
+namespace blender {
 
 /* A behaviour switch used to be a build. A guess about how a phone behaves
  * costs twenty minutes to test, and six were spent that way on the touch work
@@ -4940,5 +4945,7 @@ void WM_OT_android_knobs_reload(wmOperatorType *ot)
   ot->poll = wm_android_knobs_reload_poll;
   ot->exec = wm_android_knobs_reload_exec;
 }
+
+}  // namespace blender
 
 #endif /* __ANDROID__ */

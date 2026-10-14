@@ -57,6 +57,15 @@
 
 namespace blender_android_knobs {
 
+/** The switch table. A function-local static so the accessors below need no
+ * state and a later include cannot disturb it. Declared before load(), which
+ * is what fills it. */
+inline std::map<std::string, std::string> &table()
+{
+  static std::map<std::string, std::string> t;
+  return t;
+}
+
 /** Trim trailing whitespace and the newline a shell-written file arrives with.
  * "1\n" would read as 1 only by luck. */
 inline void trim(char *s)
@@ -101,14 +110,6 @@ inline void load()
 }
 
 }  // namespace blender_android_knobs
-
-/** The switch table. A function-local static so the accessors below need no
- * state and a later include cannot disturb it. */
-inline std::map<std::string, std::string> &table()
-{
-  static std::map<std::string, std::string> t;
-  return t;
-}
 
 /** Re-read the switch file. Call after editing it; the operator
  * `wm.android_knobs_reload` does. */
