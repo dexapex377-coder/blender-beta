@@ -1844,7 +1844,22 @@ def km_view3d(params):
             {"type": 'NDOF_BUTTON_' + axis_type, "value": 'PRESS', "shift": True},
             {"properties": [("type", axis_type), ("align_active", True)]},
         ) for axis_type in ('FRONT', 'RIGHT', 'TOP')),
-        # Selection.
+        # Touch: one finger drag on empty space orbits. Declared here, ahead of the
+# selection entries, because the order inside a keymap is the order of this list
+# and the item has to be reached before view3d.select claims the press.
+#
+# It is deliberately absent from the "3D View Tool: ..." keymaps. Those are only
+# consulted while that tool is active, so leaving this one out of them is what
+# makes an active tool win: with a tool running, its keymap decides and there is
+# no orbit entry to find; with none running, this generic keymap is what gets
+# asked and the drag orbits instead of selecting.
+#
+# view3d.touch_orbit_empty is registered by scripts/startup/bl_touch_orbit.py. A
+# keymap item naming an operator that does not exist is not an error here --
+# wm_operator_call_internal() guards on a null type -- so the item is inert until
+# that script runs, and the arrangement is exactly as it is without touch.
+("view3d.touch_orbit_empty", {"type": 'LEFTMOUSE', "value": 'CLICK_DRAG'}, None),
+# Selection.
         *_template_view3d_select(
             type=params.select_mouse,
             value=params.select_mouse_value_fallback,
