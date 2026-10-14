@@ -72,7 +72,24 @@
  * SHADOW_TILEMAP_RES max is 32 because of the shared bitmaps used for LOD tagging.
  * It is also limited by the maximum thread group size (1024).
  */
-#if 0
+#if defined(__ANDROID__)
+/* Android: the upstream values dispatch local_size(32, 32), which is exactly
+ * maxComputeWorkGroupInvocations on the phones this has to run on -- 1024 on the PowerVR
+ * BXM-8-256 here, zero margin, in six shaders. Vulkan only guarantees 128.
+ *
+ * Shadows are the whole problem: without them Eevee runs at about a frame a second on the
+ * same device, with them the main thread stops presenting entirely and every frame takes
+ * 60s. Cycles is not evidence that compute is fine here -- it has no GPU backend on Android
+ * and runs on the CPU, so it never exercises this path at all.
+ *
+ * The reduced values below are the ones upstream already ships in the #if 0 blocks either
+ * side of this one, for exactly the same reason ("without making debugging tools
+ * unresponsive"), so the invariants between TILEMAP_RES, PAGE_RES and the LODs stay the ones
+ * upstream tested. 4x4 and 8x8 dispatches are 16 and 64 invocations, inside the guaranteed
+ * minimum for any Vulkan implementation. */
+[[maybe_unused]] static constexpr int SHADOW_TILEMAP_RES = 4;
+[[maybe_unused]] static constexpr int SHADOW_TILEMAP_LOD = 2; /* LOG2(SHADOW_TILEMAP_RES) */
+#elif 0
 /* Useful for debugging the tile-copy version of the shadow rendering without making debugging
  * tools unresponsive. */
 [[maybe_unused]] static constexpr int SHADOW_TILEMAP_RES = 4;
@@ -99,7 +116,13 @@
      SHADOW_TILEMAP_LOD3_LEN + SHADOW_TILEMAP_LOD4_LEN + SHADOW_TILEMAP_LOD5_LEN);
 /* Maximum number of relative LOD distance we can store. */
 [[maybe_unused]] static constexpr int SHADOW_TILEMAP_MAX_CLIPMAP_LOD = 8;
-#if 0
+#if defined(__ANDROID__)
+/* Android: see SHADOW_TILEMAP_RES above. This one dispatches local_size(32, 32) as well,
+ * another 1024 invocations with no margin. 8x8 is 64, inside the Vulkan guaranteed minimum. */
+[[maybe_unused]] static constexpr int SHADOW_PAGE_CLEAR_GROUP_SIZE = 8;
+[[maybe_unused]] static constexpr int SHADOW_PAGE_RES = 8;
+[[maybe_unused]] static constexpr int SHADOW_PAGE_LOD = 3; /* LOG2(SHADOW_PAGE_RES) */
+#elif 0
 /* Useful for debugging the tile-copy version of the shadow rendering without making debugging
  * tools unresponsive. */
 [[maybe_unused]] static constexpr int SHADOW_PAGE_CLEAR_GROUP_SIZE= 8;
