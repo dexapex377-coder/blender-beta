@@ -559,6 +559,15 @@ void VKBackend::detect_workarounds(VKDevice &device)
       VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME);
   extensions.graphics_pipeline_library = device.supports_extension(
       VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME);
+#ifdef __ANDROID__
+  /* ...but not on Android. Qualcomm's Vulkan driver can advertise graphics pipeline libraries
+   * and still fail while compiling or linking Blender's first UI pipelines. The failed
+   * pipelines leave the swap-chain presenting an otherwise healthy black frame, so it looks
+   * like the window is not being drawn to rather than like a pipeline problem. Prefer the
+   * spec-compatible monolithic pipeline path until the affected driver versions can be
+   * identified reliably. */
+  extensions.graphics_pipeline_library = false;
+#endif
   extensions.line_rasterization = device.supports_extension(
       VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME);
   extensions.extended_dynamic_state = device.supports_extension(

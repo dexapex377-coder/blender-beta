@@ -28,6 +28,11 @@
 
 #include "GPU_capabilities.hh"
 
+#ifdef __ANDROID__
+#  include <cstdlib>
+#  include <sys/system_properties.h>
+#endif
+
 namespace blender::workbench {
 
 /* Used for update detection on the render settings. */
@@ -227,8 +232,28 @@ void SceneState::init(const DRWContext *context,
     /* Only draw using SMAA or no AA when navigating. */
     _samples_len = min_ii(_samples_len, 1);
   }
+#ifdef __ANDROID__
+  /* Cap TAA to 1 sample always. Full idle TAA (default 8) renders the whole engine 8x per
+   * presented frame, because workbench_engine.cc requests a redraw per sample. Box select and
+   * navigation already cap to 1 and the same scene runs at ~50fps there, against <20fps idle.
+   * Measured on the PowerVR BXM-8-256. */
+  _samples_len = min_ii(_samples_len, 1);
+  /* SMAA is three full-resolution passes (edge RG8, weight RGBA8, resolve) on top of that, and
+   * it measured 42fps against 14fps without it on the same part.
+   *
+   * kronos3D turns it off unconditionally and leaves a note that the A/B still needs redoing.
+   * It is a property here so that measurement can be repeated on the device in question without
+   * a rebuild: `setprop debug.blender.smaa 1` puts it back, 0 or absent leaves it off. With TAA
+   * accumulation already capped to 1 above, this is the only anti-aliasing left. */
+  static const bool smaa_enabled = []() {
+    char value[PROP_VALUE_MAX] = {};
+    return __system_property_get("debug.blender.smaa", value) > 0 && atoi(value) != 0;
+  }();
+  draw_aa = smaa_enabled;
+#else
   /* 0 samples means no AA */
   draw_aa = _samples_len > 0;
+#endif
   _samples_len = max_ii(_samples_len, 1);
 
   /* Reset the TAA when we have already draw a sample, but the sample count differs from previous

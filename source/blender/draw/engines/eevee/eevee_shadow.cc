@@ -603,8 +603,24 @@ void ShadowModule::init()
   }
 
   /* Pool size is in MBytes. */
-  const size_t pool_byte_size = enabled_ ? size_t(scene.eevee.shadow_pool_size) * square_i(1024) :
-                                           1;
+  int pool_size_mb = scene.eevee.shadow_pool_size;
+#ifdef __ANDROID__
+  /* The desktop default (512MB) is larger than the GPU budget of any phone, and it is reserved
+   * up front even for a small material preview.
+   *
+   * Capping this only below 6GB of system memory reads the wrong number: the constraint is the
+   * GPU allocation budget, and on a mobile part that is shared with everything else on the
+   * device however much RAM is fitted. A 12GB phone still had the scene killed -- the pool does
+   * not appear in the process RSS, so the reservation was invisible right up to the point where
+   * Android SIGKILLed the foreground application. Cap it on Android regardless of how much
+   * memory the device reports.
+   *
+   * 64MB still holds a useful number of shadow pages for a phone-sized viewport; the pool is a
+   * cache, so a smaller one costs shadow detail at a distance, not correctness. An explicit
+   * preference below the cap still wins. */
+  pool_size_mb = min_ii(pool_size_mb, 64);
+#endif
+  const size_t pool_byte_size = enabled_ ? size_t(pool_size_mb) * square_i(1024) : 1;
   const size_t page_byte_size = square_i(shadow_page_size_) * sizeof(int);
   shadow_page_len_ = int(divide_ceil_ul(pool_byte_size, page_byte_size));
   shadow_page_len_ = min_ii(shadow_page_len_, SHADOW_MAX_PAGE);

@@ -49,7 +49,25 @@ uint32_t GPU_max_buffer_texture_size()
 int GPU_texture_size_with_limit(int res)
 {
   int size = GPU_max_texture_size();
-  int reslimit = (U.glreslimit != 0) ? min_ii(U.glreslimit, size) : size;
+  int user_limit = U.glreslimit;
+#ifdef __ANDROID__
+  /* Preferences written before the default became 1024 load this as zero, which reads here as
+   * "no limit". On Android that is not survivable, so fall back to the same default.
+   *
+   * A production scene easily carries a dozen 4096x4096 maps; each is 64MB once resident, and
+   * a mobile GPU shares that budget with the rest of the device. One such scene reserved close
+   * to a gigabyte of textures alone and Android SIGKILLed the application before the first
+   * frame finished -- no crash, nothing in the log, because GPU allocations never appear in the
+   * process RSS.
+   *
+   * 2048 was not enough: a scene with fifteen 4096x4096 maps still drove the graphics
+   * allocation to roughly 6 GB and was killed, while the same scene at 1024 settles at 1.3 GB
+   * and stays up. An explicit preference still wins, so this only fills in the unset case. */
+  if (user_limit == 0) {
+    user_limit = 1024;
+  }
+#endif
+  int reslimit = (user_limit != 0) ? min_ii(user_limit, size) : size;
   return min_ii(reslimit, res);
 }
 
