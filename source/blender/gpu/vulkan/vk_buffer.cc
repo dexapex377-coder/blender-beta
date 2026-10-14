@@ -13,6 +13,33 @@
 
 #include "CLG_log.h"
 
+#ifdef __ANDROID__
+#  include <android/log.h>
+#  include <cstdarg>
+#  include <cstdlib>
+#  include <sys/system_properties.h>
+/* Off unless `debug.blender.log` is set. An allocation that fails is invisible otherwise:
+ * nothing throws, nothing is printed, and the symptom is a viewport that stops presenting
+ * while every thread sleeps. */
+static void vk_alloc_log(const char *format, ...)
+{
+  static const bool enabled = []() {
+    char value[PROP_VALUE_MAX] = {};
+    return __system_property_get("debug.blender.log", value) > 0 && atoi(value) != 0;
+  }();
+  if (!enabled) {
+    return;
+  }
+  va_list args;
+  va_start(args, format);
+  __android_log_vprint(ANDROID_LOG_ERROR, "blender-vkalloc", format, args);
+  va_end(args);
+}
+#  define ALLOCLOG(...) vk_alloc_log(__VA_ARGS__)
+#else
+#  define ALLOCLOG(...) ((void)0)
+#endif
+
 namespace blender {
 
 static CLG_LogRef LOG = {"gpu.vulkan"};
@@ -106,6 +133,10 @@ bool VKBuffer::create(size_t size_in_bytes,
                                                  &allocation_,
                                                  nullptr);
   if (result != VK_SUCCESS) {
+    ALLOCLOG("vmaCreateBuffer FAILED res=%d size=%llu usage=%d",
+             int(result),
+             (unsigned long long)create_info.size,
+             int(create_info.usage));
     allocation_failed_ = true;
     size_in_bytes_ = 0;
     alloc_size_in_bytes_ = 0;

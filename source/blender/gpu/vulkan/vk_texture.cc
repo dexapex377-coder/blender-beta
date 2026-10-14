@@ -27,6 +27,31 @@
 
 #include "BKE_global.hh"
 
+#ifdef __ANDROID__
+#  include <android/log.h>
+#  include <cstdarg>
+#  include <cstdlib>
+#  include <sys/system_properties.h>
+/* Off unless `debug.blender.log` is set. See the same helper in vk_buffer.cc. */
+static void vk_alloc_log(const char *format, ...)
+{
+  static const bool enabled = []() {
+    char value[PROP_VALUE_MAX] = {};
+    return __system_property_get("debug.blender.log", value) > 0 && atoi(value) != 0;
+  }();
+  if (!enabled) {
+    return;
+  }
+  va_list args;
+  va_start(args, format);
+  __android_log_vprint(ANDROID_LOG_ERROR, "blender-vkalloc", format, args);
+  va_end(args);
+}
+#  define ALLOCLOG(...) vk_alloc_log(__VA_ARGS__)
+#else
+#  define ALLOCLOG(...) ((void)0)
+#endif
+
 namespace blender::gpu {
 
 static VkImageAspectFlags to_vk_image_aspect_single_bit(const VkImageAspectFlags format,
@@ -770,6 +795,17 @@ bool VKTexture::allocate()
                           &allocation_,
                           &allocation_info_);
   if (result != VK_SUCCESS) {
+    /* Allocation failures are otherwise invisible: nothing throws, nothing is logged, and the
+     * symptom is a viewport that stops presenting while every thread sleeps. A GPU allocation
+     * never shows up in the process RSS either, so there is nothing else to go on. */
+    ALLOCLOG("vmaCreateImage FAILED res=%d name=%s %ux%u layers=%d mips=%d fmt=%d",
+             int(result),
+             name_.c_str(),
+             image_info.extent.width,
+             image_info.extent.height,
+             int(image_info.arrayLayers),
+             int(image_info.mipLevels),
+             int(image_info.format));
     return false;
   }
   debug::object_label(vk_image_, name_.c_str());
