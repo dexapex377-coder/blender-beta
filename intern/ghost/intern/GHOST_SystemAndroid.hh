@@ -147,6 +147,10 @@ class GHOST_SystemAndroid : public GHOST_System {
   bool touch_pending_;          /* Finger down, button not decided yet. */
   bool touch_button_down_;      /* A button was emitted and is still held. */
   GHOST_TButton touch_button_;  /* Which button was emitted. */
+  /* One finger drag reported as a pan, see GHOST_android_one_finger_pan(). The
+   * button press is never emitted for this drag, so there is no button to release. */
+  bool touch_pan1_active_;
+  int32_t touch_pan1_last_x_, touch_pan1_last_y_;
   /* Tablet state of the pointer the buttons belong to. Blender picks the drag
    * threshold from this, and a stylus needs the larger tablet one: judged as a
    * mouse, normal tremor between contact and lift is read as a drag, so the

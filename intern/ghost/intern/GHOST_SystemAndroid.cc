@@ -69,6 +69,9 @@ GHOST_SystemAndroid::GHOST_SystemAndroid()
       gesture_kind_(GestureKind::Undecided),
       touch_pan_active_(false),
       touch_shift_active_(false),
+      touch_pan1_active_(false),
+      touch_pan1_last_x_(0),
+      touch_pan1_last_y_(0),
       touch_pending_(false),
       touch_button_down_(false),
       touch_button_(GHOST_kButtonMaskLeft),
@@ -374,6 +377,10 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
     if (!touch_pan_active_) {
       touchCancelPending();
     }
+    /* A one finger pan that a second and third finger grow out of has to end here, or it
+     * would still be live when they lift again and the remaining finger would pan twice
+     * over. touchCancelPending() only runs on the first finger down. */
+    touch_pan1_active_ = false;
     float cx = 0.0f, cy = 0.0f;
     for (int i = 0; i < 3; i++) {
       cx += ghost_android_scale_input(AMotionEvent_getX(event, i));
@@ -557,9 +564,49 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
                                                       touch_down_x_,
                                                       touch_down_y_,
                                                       tablet));
-        touchSendButton(GHOST_kButtonMaskLeft, GHOST_kEventButtonDown);
+        if (GHOST_android_one_finger_pan()) {
+          /* Report the drag as a pan instead of a left button drag, and emit no button at
+           * all. MOUSEPAN means "scroll" in a panel and "orbit" in the viewport purely
+           * through the keymap, so the same finger does the right thing in both without
+           * this layer knowing which region it is over. Withholding the button is what
+           * keeps a drag from also selecting: the press that would have started the
+           * selection is never sent, and a tap that never crosses the slop still sends
+           * it on lift. */
+          touch_pan1_active_ = true;
+          touch_pan1_last_x_ = touch_down_x_;
+          touch_pan1_last_y_ = touch_down_y_;
+        }
+        else {
+          touchSendButton(GHOST_kButtonMaskLeft, GHOST_kEventButtonDown);
+        }
         pushEvent(std::make_unique<GHOST_EventCursor>(
             getMilliSeconds(), GHOST_kEventCursorMove, window_, x, y, tablet));
+      }
+      /* Movement of a one finger pan. Reported from one motion event to the next and never
+       * from where the finger first landed: that origin belongs to the press that was
+       * deliberately not sent, so measuring from it would apply the whole travel in one
+       * jump on the first move instead of tracking the hand. */
+      if (touch_pan1_active_) {
+        const int32_t dx = x - touch_pan1_last_x_;
+        const int32_t dy = y - touch_pan1_last_y_;
+        if (dx != 0 || dy != 0) {
+          touch_pan1_last_x_ = x;
+          touch_pan1_last_y_ = y;
+          pushEvent(std::make_unique<GHOST_EventTrackpad>(getMilliSeconds(),
+                                                          window_,
+                                                          GHOST_kTrackpadEventScroll,
+                                                          x,
+                                                          y,
+                                                          dx,
+                                                          dy,
+                                                          /* Direct touch is natural
+                                                           * scrolling, as macOS reports
+                                                           * it, and inverting here as
+                                                           * well would flip every consumer
+                                                           * that honours the flag and
+                                                           * leave the rest alone. */
+                                                          true));
+        }
       }
       return 1;
 
@@ -570,6 +617,8 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
         touch_pending_ = false;
         touchSendButton(GHOST_kButtonMaskLeft, GHOST_kEventButtonDown);
       }
+      /* A one finger pan never sent a button, so there is nothing to release here. */
+      touch_pan1_active_ = false;
       if (touch_button_down_) {
         touchSendButton(touch_button_, GHOST_kEventButtonUp);
       }
@@ -664,6 +713,7 @@ void GHOST_SystemAndroid::touchLongPressCheck()
 void GHOST_SystemAndroid::touchCancelPending()
 {
   touch_pending_ = false;
+  touch_pan1_active_ = false;
   if (touch_button_down_) {
     touchSendButton(touch_button_, GHOST_kEventButtonUp);
   }

@@ -63,6 +63,37 @@ inline uint32_t GHOST_android_render_scale_divisor()
   return divisor;
 }
 
+/** Whether a one finger drag reports as a pan instead of a left button drag.
+ *
+ * Off by default, which is upstream's behaviour: the drag is a left button drag and the
+ * keymap decides what a drag means. On, a drag past the slop reports as
+ * `GHOST_kTrackpadEventScroll`, which the window manager turns into MOUSEPAN -- and the
+ * keymaps already disagree about what that means by region, so one gesture covers
+ * everything without anything having to know which region it landed in:
+ *
+ *   - panels, side bar, tool bar, Properties  -> `view2d.pan` on TRACKPADPAN, scrolls
+ *   - the 3D viewport                         -> `view3d.rotate` on TRACKPADPAN, orbits
+ *
+ * A tap is untouched either way: the button press is only withheld once the finger has
+ * actually travelled, so selecting, opening a menu and pressing a button are unaffected.
+ *
+ * This exists because orbiting a 3D view with two fingers is a poor bargain on a phone --
+ * the same gesture zooms instead whenever the fingers drift, which on a small screen is
+ * most of the time. `setprop debug.blender.gestures 1` turns it on; the value is read
+ * once per process, so restart the app after changing it.
+ */
+inline bool GHOST_android_one_finger_pan()
+{
+  static const bool one_finger_pan = []() {
+    char value[PROP_VALUE_MAX] = {};
+    if (__system_property_get("debug.blender.gestures", value) > 0 && value[0] != '\0') {
+      return atoi(value) != 0;
+    }
+    return false;
+  }();
+  return one_finger_pan;
+}
+
 /**
  * UI density used by Blender's desktop-oriented layout.
  *
