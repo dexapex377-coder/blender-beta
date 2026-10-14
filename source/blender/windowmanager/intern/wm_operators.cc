@@ -4888,6 +4888,8 @@ const EnumPropertyItem *RNA_mask_local_itemf(bContext *C,
                       nullptr);
 }
 
+}  // namespace blender
+
 /** \} */
 
 /** Android runtime switches: re-read the switch file from the device. */
