@@ -121,6 +121,13 @@
 
 namespace blender {
 
+#ifdef __ANDROID__
+/* Declared here, defined at the foot of the file next to the switch header it
+ * needs. Without this the append at wm_operatortypes_register() names an unknown
+ * function. */
+void WM_OT_android_knobs_reload(wmOperatorType *ot);
+#endif
+
 #define UNDOCUMENTED_OPERATOR_TIP N_("(undocumented operator)")
 
 /* -------------------------------------------------------------------- */
@@ -4437,6 +4444,9 @@ void wm_operatortypes_register()
   WM_operatortype_append(WM_OT_call_asset_shelf_popover);
   WM_operatortype_append(WM_OT_radial_control);
   WM_operatortype_append(WM_OT_stereo3d_set);
+#ifdef __ANDROID__
+  WM_operatortype_append(WM_OT_android_knobs_reload);
+#endif
 #if defined(WIN32)
   WM_operatortype_append(WM_OT_console_toggle);
 #endif
@@ -4878,6 +4888,60 @@ const EnumPropertyItem *RNA_mask_local_itemf(bContext *C,
                       nullptr);
 }
 
-/** \} */
+
+/** Android runtime switches: re-read the switch file from the device. */
+
+#ifdef __ANDROID__
+
+#  include "BLI_android_knobs.hh"
+
+#  include <algorithm>
+#  include <string>
+
+namespace blender {
+
+/* A behaviour switch used to be a build. A guess about how a phone behaves
+ * costs twenty minutes to test, and six were spent that way on the touch work
+ * before noticing that the cheap attempts were the ones that worked: the scroll
+ * fix came out of a Python script with no rebuild at all. The file is editable
+ * on the device and this picks a change up without even a restart. */
+static bool wm_android_knobs_reload_poll(bContext * /*C*/)
+{
+  return true;
+}
+
+static int wm_android_knobs_reload_exec(bContext * /*C*/)
+{
+  BLI_android_knobs_reload();
+  const std::string dump = BLI_android_knobs_dump();
+  const size_t count = size_t(std::count(dump.begin(), dump.end(), '\n'));
+  CLOG_INFO(LOG_BLEND,
+            "Android switches reloaded from %s, %zu set",
+            BLI_ANDROID_KNOBS_FILE,
+            count);
+  size_t start = 0;
+  while (start < dump.size()) {
+    const size_t end = dump.find('\n', start);
+    if (end == std::string::npos) {
+      break;
+    }
+    CLOG_INFO(LOG_BLEND, "  %s", dump.substr(start, end - start).c_str());
+    start = end + 1;
+  }
+  return 1;
+}
+
+void WM_OT_android_knobs_reload(wmOperatorType *ot)
+{
+  ot->idname = "WM_OT_android_knobs_reload";
+  ot->name = "Re-read Android Switches";
+  ot->description = "Re-read the Android runtime switch file from the device";
+  ot->poll = wm_android_knobs_reload_poll;
+  ot->exec = wm_android_knobs_reload_exec;
+}
 
 }  // namespace blender
+
+#endif /* __ANDROID__ */
+
+/** \} */

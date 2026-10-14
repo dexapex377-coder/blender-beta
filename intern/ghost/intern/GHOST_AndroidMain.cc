@@ -14,6 +14,8 @@
 
 #include "BLI_threads.hh"
 
+#include "CLG_log.h"
+
 #include <atomic>
 #include <android/log.h>
 #include <android_native_app_glue.h>
@@ -290,6 +292,27 @@ extern "C" void android_main(struct android_app *app)
   blender::BLI_threadapi_init();
 
   ghost_android_redirect_stdio();
+
+  /* Logging.
+   *
+   * creator.cc does this for a desktop build and skips it on Android, so this
+   * port never had it -- and CLG_init() is what installs the handler and the
+   * levels. Without it every CLOG_DEBUG in the tree is discarded silently: with
+   * --debug on the command line, a category with real output behind it still
+   * printed nothing, and the click-drag trace in wm_event_system.cc -- the one
+   * that says "Canceling CLICK_DRAG: motion event was handled", which is what
+   * explains a drag that never forms -- stayed invisible.
+   *
+   * Called after the stdio redirect so it lands in logcat. The output settings
+   * match creator.cc: a timestamp is worth having in a capture, and the source
+   * file and basename are noise once a run is interleaved with the rest of the
+   * system. */
+  CLG_init();
+  CLG_output_use_timestamp_set(true);
+  CLG_output_use_memory_set(false);
+  CLG_output_use_source_set(false);
+  CLG_output_use_basename_set(false);
+
   GHOST_SystemAndroid::setAndroidApp(app);
   app->onAppCmd = on_app_cmd;
   app->onInputEvent = on_input_event;
