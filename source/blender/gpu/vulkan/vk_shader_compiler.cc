@@ -515,9 +515,9 @@ static bool compile_ex(shaderc::Compiler &compiler,
   if (!compilation_succeeded) {
     /* This is the only place a shader failure is visible without a debugger: Blender reports
      * "Could not compile shader" to the UI and otherwise says nothing about why. */
-    const char *error_message = shader_module.compilation_result.GetErrorMessage();
-    if (error_message != nullptr) {
-      std::string one_line(error_message);
+    const std::string error_message = shader_module.compilation_result.GetErrorMessage();
+    if (!error_message.empty()) {
+      std::string one_line = error_message;
       for (char &c : one_line) {
         if (c == '\n' || c == '\r') {
           c = ' ';
