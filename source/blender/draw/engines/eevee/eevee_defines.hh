@@ -72,23 +72,9 @@
  * SHADOW_TILEMAP_RES max is 32 because of the shared bitmaps used for LOD tagging.
  * It is also limited by the maximum thread group size (1024).
  */
-#ifdef __ANDROID__
-/* Android: the upstream values dispatch local_size(32, 32), which is exactly
- * maxComputeWorkGroupInvocations on the phones this has to run on -- 1024 on the PowerVR
- * BXM-8-256 here, zero margin, in six shaders. Vulkan only guarantees 128.
- *
- * Shadows are the whole problem: without them Eevee runs at about a frame a second on the
- * same device, with them the main thread stops presenting entirely and every frame takes
- * 60s. Cycles is not evidence that compute is fine here -- it has no GPU backend on Android
- * and runs on the CPU, so it never exercises this path at all.
- *
- * The reduced values are the ones upstream ships in the disabled debug block, for exactly
- * the same reason ("without making debugging tools unresponsive"), so the invariants between
- * TILEMAP_RES, PAGE_RES and the LODs stay on values upstream tested. 4x4 and 8x8 dispatches
- * are 16 and 64 invocations, inside the guaranteed minimum for any Vulkan implementation.
- *
- * No #elif here on purpose: this header is also consumed by the shader preprocessor, which
- * does not handle it and takes both branches, redefining the constant. */
+#if 0
+/* Useful for debugging the tile-copy version of the shadow rendering without making debugging
+ * tools unresponsive. */
 [[maybe_unused]] static constexpr int SHADOW_TILEMAP_RES = 4;
 [[maybe_unused]] static constexpr int SHADOW_TILEMAP_LOD = 2; /* LOG2(SHADOW_TILEMAP_RES) */
 #else
@@ -113,12 +99,12 @@
      SHADOW_TILEMAP_LOD3_LEN + SHADOW_TILEMAP_LOD4_LEN + SHADOW_TILEMAP_LOD5_LEN);
 /* Maximum number of relative LOD distance we can store. */
 [[maybe_unused]] static constexpr int SHADOW_TILEMAP_MAX_CLIPMAP_LOD = 8;
-#ifdef __ANDROID__
-/* Android: see SHADOW_TILEMAP_RES above. This one dispatches local_size(32, 32) as well,
- * another 1024 invocations with no margin. 8x8 is 64, inside the Vulkan guaranteed minimum. */
-[[maybe_unused]] static constexpr int SHADOW_PAGE_CLEAR_GROUP_SIZE = 8;
-[[maybe_unused]] static constexpr int SHADOW_PAGE_RES = 8;
-[[maybe_unused]] static constexpr int SHADOW_PAGE_LOD = 3; /* LOG2(SHADOW_PAGE_RES) */
+#if 0
+/* Useful for debugging the tile-copy version of the shadow rendering without making debugging
+ * tools unresponsive. */
+[[maybe_unused]] static constexpr int SHADOW_PAGE_CLEAR_GROUP_SIZE= 8;
+[[maybe_unused]] static constexpr int SHADOW_PAGE_RES= 8;
+[[maybe_unused]] static constexpr int SHADOW_PAGE_LOD= 3; /* LOG2(SHADOW_PAGE_RES) */
 #else
 [[maybe_unused]] static constexpr int SHADOW_PAGE_CLEAR_GROUP_SIZE = 32;
 [[maybe_unused]] static constexpr int SHADOW_PAGE_RES = 256;
