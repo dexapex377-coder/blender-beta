@@ -491,8 +491,7 @@ struct GHOST_InstanceVK {
           !device_vk.features.features.geometryShader ||
 #endif
           !device_vk.features.features.fragmentStoresAndAtomics ||
-          !device_vk.features.features.imageCubeArray ||
-          !device_vk.features.features.dualSrcBlend || !device_vk.features.features.imageCubeArray)
+          !device_vk.features.features.imageCubeArray)
       {
         continue;
       }
@@ -668,7 +667,13 @@ struct GHOST_InstanceVK {
     device_features.shaderClipDistance = device.features.features.shaderClipDistance;
     device_features.fragmentStoresAndAtomics = VK_TRUE;
 
-    device_features.dualSrcBlend = VK_TRUE;
+    /* Requested only when the device actually has it. Blender's Vulkan backend never issues a
+     * dual-source blend (every attachment state in vk_graphics_pipeline.hh uses single-source
+     * factors), so this used to be a hard requirement that only served to reject devices.
+     * Mali-G52 lacks it, and that check was what made select_physical_device() discard the whole
+     * device -- leaving a null VkPhysicalDevice and crashing later in backend init. Still
+     * requested when available, so nothing changes for devices that support it. */
+    device_features.dualSrcBlend = device.features.features.dualSrcBlend;
     device_features.imageCubeArray = VK_TRUE;
     device_features.multiDrawIndirect = device.features.features.multiDrawIndirect;
     device_features.drawIndirectFirstInstance = VK_TRUE;

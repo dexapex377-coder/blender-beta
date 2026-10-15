@@ -187,9 +187,11 @@ static Vector<StringRefNull> missing_capabilities_get(VkPhysicalDevice vk_physic
   if (features.features.fragmentStoresAndAtomics == VK_FALSE) {
     missing_capabilities.append("fragment stores and atomics");
   }
-  if (features.features.dualSrcBlend == VK_FALSE) {
-    missing_capabilities.append("dual source blending");
-  }
+  /* Note: dual source blending used to be checked here and is deliberately not. Nothing in the
+   * Vulkan backend issues one -- every attachment state built in vk_graphics_pipeline.hh uses
+   * single-source blend factors, and the only SRC1 reference in the tree is in the OpenGL backend.
+   * Reporting it as missing rejected Mali-G52 outright, a large part of the Android install base,
+   * for a capability nothing asks for. It is still requested at device creation when available. */
   if (features.features.imageCubeArray == VK_FALSE) {
     missing_capabilities.append("image cube array");
   }
