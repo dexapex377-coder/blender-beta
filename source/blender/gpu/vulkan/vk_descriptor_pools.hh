@@ -74,17 +74,6 @@ class VKDescriptorPools {
    */
   VkDescriptorSet allocate_with_retries(const VkDescriptorSetLayout descriptor_set_layout);
   /**
-   * After a descriptor pool has been discarded and recycled, force the GPU to finish
-   * and invalidate any cached descriptor set handles so they are not reused from a
-   * stale pool. Returns a small struct with the post-sync state.
-   */
-  struct AfterPoolDiscard {
-    bool state_was_dirty;
-    uint32_t descriptor_sets_invalidated;
-  };
-  static AfterPoolDiscard sync_after_pool_discard(VKContext &context);
-
-  /**
    * Recycle a previous discarded descriptor pool.
    */
   void recycle(VkDescriptorPool vk_descriptor_pool);
@@ -98,4 +87,18 @@ class VKDescriptorPools {
   static constexpr uint32_t MAX_POOL_ALLOCATION_RETRIES = 8;
   uint32_t allocation_retries_ = MAX_POOL_ALLOCATION_RETRIES;
 };
+
+/** Result of sync_after_pool_discard(). */
+struct AfterPoolDiscard {
+  bool state_was_dirty;
+  uint32_t descriptor_sets_invalidated;
+};
+
+/**
+ * Force the GPU to finish and invalidate cached descriptor set handles after a pool
+ * discard. Lives here so callers outside gpu/vulkan (eevee_shadow.cc) can use it
+ * without including this header, which needs a CMake reconfigure to resolve.
+ */
+AfterPoolDiscard sync_after_pool_discard(VKContext &context);
+
 }  // namespace blender::gpu

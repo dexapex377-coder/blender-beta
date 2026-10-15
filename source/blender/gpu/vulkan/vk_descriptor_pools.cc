@@ -82,8 +82,7 @@ void VKDescriptorPools::discard_active_pool(VKContext &context)
   context.descriptor_set_get().invalidate();
 }
 
-VKDescriptorPools::AfterPoolDiscard VKDescriptorPools::sync_after_pool_discard(
-    VKContext &context)
+AfterPoolDiscard sync_after_pool_discard(VKContext &context)
 {
   /* GPU_finish() is a full barrier: the CPU waits for every previously submitted
    * command to complete before the caller reads anything the GPU writes. Without

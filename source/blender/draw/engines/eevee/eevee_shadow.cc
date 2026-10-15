@@ -11,7 +11,13 @@
 #include "BLI_math_matrix.hh"
 #ifdef __ANDROID__
 #  include "BLI_android_knobs.hh"
-#  include "gpu/vulkan/vk_descriptor_pools.hh"
+
+/* Forward declaration: the helper lives in vk_descriptor_pools.cc, which has the
+ * includes this file cannot reach without a CMake reconfigure. */
+namespace blender::gpu {
+struct AfterPoolDiscard;
+AfterPoolDiscard sync_after_pool_discard(struct VKContext &context);
+}  // namespace blender::gpu
 #endif
 #include "GPU_batch_utils.hh"
 #include "GPU_capabilities.hh"
@@ -1411,7 +1417,7 @@ void ShadowModule::render(View &view, int2 extent)
        * The sync itself lives in VKDescriptorPools::sync_after_pool_discard(), which
        * already has the includes this file cannot reach without adding gpu/vulkan
        * to the draw target's include path. */
-      VKDescriptorPools::sync_after_pool_discard(*VKContext::get());
+      blender::gpu::sync_after_pool_discard(*VKContext::get());
       statistics_buf_.current().async_flush_to_host();
       statistics_buf_.current().read();
       const ShadowStatistics &post_stats = statistics_buf_.current();
