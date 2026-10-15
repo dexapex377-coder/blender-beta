@@ -203,6 +203,55 @@ void VKDevice::init(GHOST_IContext *ghost_context)
 
   init_submission_thread();
   is_initialized_ = true;
+
+#ifdef __ANDROID__
+  /* Name the Vulkan entry points this device did not provide.
+   *
+   * A driver that lacks a promoted function resolves it to null, and calling it is a SIGSEGV at
+   * address 0 with no diagnostic -- which is how the Mali-G52 crash was found twice, blind. The
+   * backend calls several such functions, each behind a different guard, so the only way to tell
+   * which one fired is to log the whole picture once. Read this line before chasing a backtrace:
+   * a function listed in MISSING is the call to suspect. Last in init() so it reports the flags
+   * after they are all decided. */
+  {
+    const struct {
+      const char *name;
+      const void *p;
+    } probed[] = {
+        {"vkCmdBeginRenderingKHR", (const void *)functions.vkCmdBeginRenderingKHR},
+        {"vkCmdEndRenderingKHR", (const void *)functions.vkCmdEndRenderingKHR},
+        {"vkCmdSetViewport", (const void *)functions.vkCmdSetViewport},
+        {"vkCmdSetScissor", (const void *)functions.vkCmdSetScissor},
+        {"vkCmdBeginRenderPass", (const void *)functions.vkCmdBeginRenderPass},
+        {"vkCmdEndRenderPass", (const void *)functions.vkCmdEndRenderPass},
+        {"vkCreateRenderPass", (const void *)functions.vkCreateRenderPass},
+        {"vkCreateFramebuffer", (const void *)functions.vkCreateFramebuffer},
+        {"vkCmdSetDepthBounds", (const void *)functions.vkCmdSetDepthBounds},
+        {"vkCmdSetBlendConstants", (const void *)functions.vkCmdSetBlendConstants},
+        {"vkGetBufferDeviceAddressKHR", (const void *)functions.vkGetBufferDeviceAddressKHR},
+        {"vkCmdDrawIndirectCount", (const void *)functions.vkCmdDrawIndirectCount},
+    };
+    std::stringstream missing;
+    bool first = true;
+    for (const auto &entry : probed) {
+      if (entry.p == nullptr) {
+        if (!first) {
+          missing << ",";
+        }
+        missing << entry.name;
+        first = false;
+      }
+    }
+    CLOG_INFO(&LOG,
+              "vk-init: api=%u.%u.%u fallback=%d static_vp_scissor=%d MISSING=[%s]",
+              VK_API_VERSION_MAJOR(vk_physical_device_properties_.apiVersion),
+              VK_API_VERSION_MINOR(vk_physical_device_properties_.apiVersion),
+              VK_API_VERSION_PATCH(vk_physical_device_properties_.apiVersion),
+              int(VKRenderPassFallback::is_active()),
+              int(workarounds_.static_viewport_scissor),
+              missing.str().c_str());
+  }
+#endif
 }
 
 void VKDevice::init_debug_callbacks()

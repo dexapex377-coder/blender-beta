@@ -545,6 +545,29 @@ void VKBackend::detect_workarounds(VKDevice &device)
     workarounds.static_viewport_scissor = true;
   }
 
+  /* Also force the static viewport/scissor path when the device cannot do it dynamically.
+   *
+   * vkCmdSetViewport and vkCmdSetScissor are Vulkan 1.2 core; a 1.1 device resolves both to null
+   * unless VK_EXT_extended_dynamic_state supplies them. The pipeline side needs
+   * VK_DYNAMIC_STATE_VIEWPORT/SCISSOR, which are 1.3 core or that same extension. Neither the
+   * command buffer wrapper nor the pipeline builder checked for that before: the wrapper's guard
+   * only tested this workaround flag, which is off for every non-Qualcomm device, so a 1.1
+   * driver took the dynamic path and called through a null pointer during the first render.
+   * Mali-G52 on MIUI reports Vulkan 1.1 and has neither, which is where this was hit.
+   *
+   * The static path bakes viewport and scissor into the pipeline, so nothing is lost but the
+   * per-draw change. */
+  const uint32_t api_version = device.physical_device_properties_get().apiVersion;
+  const bool has_dynamic_state_extended =
+      device.supports_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
+  const bool dynamic_viewport_scissor_usable =
+      has_dynamic_state_extended || api_version >= VK_API_VERSION_1_3;
+  if (!dynamic_viewport_scissor_usable || device.functions.vkCmdSetViewport == nullptr ||
+      device.functions.vkCmdSetScissor == nullptr)
+  {
+    workarounds.static_viewport_scissor = true;
+  }
+
   extensions.shader_viewport_index_layer = device.supports_extension(
       VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME);
   extensions.spirv_1_4 = device.supports_extension(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
