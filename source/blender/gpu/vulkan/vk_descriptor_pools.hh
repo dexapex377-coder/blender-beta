@@ -65,6 +65,16 @@ class VKDescriptorPools {
   VkDescriptorSet allocate(const VkDescriptorSetLayout descriptor_set_layout);
 
   /**
+   * Allocate with bounded retry on pool-exhausted errors.
+   *
+   * MTK/Mali drivers report an exhausted pool as VK_ERROR_OUT_OF_DEVICE_MEMORY instead of
+   * VK_ERROR_OUT_OF_POOL_MEMORY. Without retry on all three error codes, the full pool stays
+   * active and every later allocation records a VK_NULL_HANDLE set, crashing the driver in the
+   * submission thread within minutes.
+   */
+  VkDescriptorSet allocate_with_retries(const VkDescriptorSetLayout descriptor_set_layout);
+
+  /**
    * Recycle a previous discarded descriptor pool.
    */
   void recycle(VkDescriptorPool vk_descriptor_pool);
@@ -73,5 +83,9 @@ class VKDescriptorPools {
   void add_new_pool(const VKDevice &device);
   void discard_active_pool(VKContext &vk_context);
   void ensure_pool(const VKDevice &device);
+
+  /** Bounded recovery budget for allocate_with_retries(). */
+  static constexpr uint32_t MAX_POOL_ALLOCATION_RETRIES = 8;
+  uint32_t allocation_retries_ = MAX_POOL_ALLOCATION_RETRIES;
 };
 }  // namespace blender::gpu

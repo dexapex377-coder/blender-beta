@@ -9,6 +9,9 @@
  */
 
 #include "BLI_math_matrix.hh"
+#ifdef __ANDROID__
+#  include "BLI_android_knobs.hh"
+#endif
 #include "GPU_batch_utils.hh"
 #include "GPU_capabilities.hh"
 #include "GPU_compute.hh"
@@ -1390,6 +1393,32 @@ void ShadowModule::render(View &view, int2 extent)
       }
 
       inst_.pipelines.shadow.render(shadow_multi_view_);
+
+#ifdef __ANDROID__
+      /* Ported from kronos3D. Forces the CPU to wait for all pending GPU work before
+       * reading statistics back. Without this, the shadow render is submitted
+       * asynchronously and the statistics buffer read races against the GPU still
+       * writing it -- on MTK/PowerVR this produced a black cube (no shadow data
+       * ready when sampled) and stale counters. GPU_finish() is a full barrier:
+       * it waits for every previously submitted command to complete on the GPU.
+       *
+       * This is distinct from the descriptor pool fix below: that one stops the
+       * session from crashing every ~2 minutes; this one stops the shadow pass
+       * from silently producing nothing. Both are upstream bugs that kronos3D hit
+       * and fixed; neither is in a vanilla Blender tree. */
+      {
+        GPU_finish();
+        statistics_buf_.current().async_flush_to_host();
+        statistics_buf_.current().read();
+        const ShadowStatistics &post_stats = statistics_buf_.current();
+        ANDROID_KNOB_LOG("eevee.shadow",
+                        "SHADOW-RENDER post loop=%d rndr=%d alloc=%d upd=%d",
+                        loop_count,
+                        post_stats.page_rendered_count,
+                        post_stats.page_allocated_count,
+                        post_stats.page_update_count);
+      }
+#endif
 
       if (use_flush) {
         GPU_flush();
