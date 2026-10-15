@@ -44,6 +44,8 @@
 
 #ifdef __ANDROID__
 
+#  include <android/log.h>
+
 #  include <cstdio>
 #  include <cstdlib>
 #  include <cstring>
@@ -153,5 +155,21 @@ inline std::string BLI_android_knobs_dump()
   }
   return out;
 }
+
+/** Tag every line is logged under, so a capture is easy to filter. */
+#  define BLI_ANDROID_LOG_TAG "blender-knob"
+
+/** Log, but only when this site's switch is on.
+ *
+ * Per-site rather than one global level: the interesting runs are the ones
+ * watching two subsystems at once, and a single flag makes it impossible to
+ * leave anything else quiet. `log.all` turns on every site that asks. */
+#  define ANDROID_KNOB_LOG(tag, ...)                                              \
+    do {                                                                          \
+      if (BLI_android_knob_bool("log." tag, false) ||                             \
+          BLI_android_knob_bool("log.all", false)) {                              \
+        __android_log_print(ANDROID_LOG_INFO, BLI_ANDROID_LOG_TAG, __VA_ARGS__);  \
+      }                                                                           \
+    } while (0)
 
 #endif /* __ANDROID__ */
