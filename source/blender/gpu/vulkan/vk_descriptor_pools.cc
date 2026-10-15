@@ -7,11 +7,13 @@
  */
 
 #include "GPU_capabilities.hh"
+#include "GPU_context.hh"
 
 #include "vk_backend.hh"
 #include "vk_context.hh"
 #include "vk_descriptor_pools.hh"
 #include "vk_device.hh"
+#include "vk_state_manager.hh"
 
 namespace blender::gpu {
 
@@ -78,6 +80,23 @@ void VKDescriptorPools::discard_active_pool(VKContext &context)
    * reusing a stale handle, and drop the tracker's cached set + pending writes. */
   context.state_manager_get().is_dirty = true;
   context.descriptor_set_get().invalidate();
+}
+
+VKDescriptorPools::AfterPoolDiscard VKDescriptorPools::sync_after_pool_discard(
+    VKContext &context)
+{
+  /* GPU_finish() is a full barrier: the CPU waits for every previously submitted
+   * command to complete before the caller reads anything the GPU writes. Without
+   * it the statistics read in eevee_shadow.cc races against the shadow pass still
+   * in flight, which on MTK/PowerVR surfaced as a black cube. */
+  GPU_finish();
+
+  AfterPoolDiscard result;
+  result.state_was_dirty = context.state_manager_get().is_dirty;
+  context.state_manager_get().is_dirty = true;
+  context.descriptor_set_get().invalidate();
+  result.descriptor_sets_invalidated = 1;
+  return result;
 }
 
 void VKDescriptorPools::recycle(VkDescriptorPool vk_descriptor_pool)

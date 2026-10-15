@@ -73,6 +73,16 @@ class VKDescriptorPools {
    * submission thread within minutes.
    */
   VkDescriptorSet allocate_with_retries(const VkDescriptorSetLayout descriptor_set_layout);
+  /**
+   * After a descriptor pool has been discarded and recycled, force the GPU to finish
+   * and invalidate any cached descriptor set handles so they are not reused from a
+   * stale pool. Returns a small struct with the post-sync state.
+   */
+  struct AfterPoolDiscard {
+    bool state_was_dirty;
+    uint32_t descriptor_sets_invalidated;
+  };
+  static AfterPoolDiscard sync_after_pool_discard(VKContext &context);
 
   /**
    * Recycle a previous discarded descriptor pool.

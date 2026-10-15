@@ -11,7 +11,7 @@
 #include "BLI_math_matrix.hh"
 #ifdef __ANDROID__
 #  include "BLI_android_knobs.hh"
-#  include "gpu/vulkan/vk_state_manager.hh"
+#  include "gpu/vulkan/vk_descriptor_pools.hh"
 #endif
 #include "GPU_batch_utils.hh"
 #include "GPU_capabilities.hh"
@@ -1403,22 +1403,24 @@ void ShadowModule::render(View &view, int2 extent)
        * ready when sampled) and stale counters. GPU_finish() is a full barrier:
        * it waits for every previously submitted command to complete on the GPU.
        *
-       * This is distinct from the descriptor pool fix below: that one stops the
-       * session from crashing every ~2 minutes; this one stops the shadow pass
-       * from silently producing nothing. Both are upstream bugs that kronos3D hit
-       * and fixed; neither is in a vanilla Blender tree. */
-      {
-        GPU_finish();
-        statistics_buf_.current().async_flush_to_host();
-        statistics_buf_.current().read();
-        const ShadowStatistics &post_stats = statistics_buf_.current();
-        ANDROID_KNOB_LOG("eevee.shadow",
-                        "SHADOW-RENDER post loop=%d rndr=%d alloc=%d upd=%d",
-                        loop_count,
-                        post_stats.page_rendered_count,
-                        post_stats.page_allocated_count,
-                        post_stats.page_update_count);
-      }
+       * This is distinct from the descriptor pool fix: that one stops the session
+       * from crashing every ~2 minutes; this one stops the shadow pass from
+       * silently producing nothing. Both are upstream bugs that kronos3D hit and
+       * fixed; neither is in a vanilla Blender tree.
+       *
+       * The sync itself lives in VKDescriptorPools::sync_after_pool_discard(), which
+       * already has the includes this file cannot reach without adding gpu/vulkan
+       * to the draw target's include path. */
+      VKDescriptorPools::sync_after_pool_discard(*VKContext::get());
+      statistics_buf_.current().async_flush_to_host();
+      statistics_buf_.current().read();
+      const ShadowStatistics &post_stats = statistics_buf_.current();
+      ANDROID_KNOB_LOG("eevee.shadow",
+                      "SHADOW-RENDER post loop=%d rndr=%d alloc=%d upd=%d",
+                      loop_count,
+                      post_stats.page_rendered_count,
+                      post_stats.page_allocated_count,
+                      post_stats.page_update_count);
 #endif
 
       if (use_flush) {
