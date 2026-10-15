@@ -12,11 +12,12 @@
 #ifdef __ANDROID__
 #  include "BLI_android_knobs.hh"
 
-/* Forward declaration: the helper lives in vk_descriptor_pools.cc, which has the
+/* Forward declarations: the helper lives in vk_descriptor_pools.cc, which has the
  * includes this file cannot reach without a CMake reconfigure. */
 namespace blender::gpu {
+class VKContext;
 struct AfterPoolDiscard;
-AfterPoolDiscard sync_after_pool_discard(struct VKContext &context);
+AfterPoolDiscard sync_after_pool_discard(VKContext &context);
 }  // namespace blender::gpu
 #endif
 #include "GPU_batch_utils.hh"
