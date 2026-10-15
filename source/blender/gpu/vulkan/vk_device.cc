@@ -242,7 +242,9 @@ void VKDevice::init(GHOST_IContext *ghost_context)
         first = false;
       }
     }
-    CLOG_INFO(&LOG,
+    /* WARNING, not INFO: CLOG drops INFO on this build and a diagnostic nobody sees is worth
+     * nothing. Verified on device that WARNING reaches logcat under the `blender` tag. */
+    CLOG_WARN(&LOG,
               "vk-init: api=%u.%u.%u fallback=%d static_vp_scissor=%d MISSING=[%s]",
               VK_API_VERSION_MAJOR(vk_physical_device_properties_.apiVersion),
               VK_API_VERSION_MINOR(vk_physical_device_properties_.apiVersion),

@@ -10,6 +10,12 @@
 #include "vk_backend.hh"
 #include "vk_device.hh"
 
+#ifdef __ANDROID__
+#  include <android/log.h>
+#  include <cstdlib>
+#  include <sys/system_properties.h>
+#endif
+
 namespace blender::gpu::render_graph {
 VKCommandBufferWrapper::VKCommandBufferWrapper(VkCommandBuffer vk_command_buffer,
                                                const VolkDeviceTable &functions,
@@ -344,6 +350,28 @@ void VKCommandBufferWrapper::begin_render_pass(VkRenderPass vk_render_pass,
    * C++11 and later, and nullptr cannot initialise the VkSubpassContents enum that this parameter
    * became when VK_KHR_maintenance1 promoted it out of void*. The cast is the same value, 0. */
   const VkSubpassContents inline_contents = static_cast<VkSubpassContents>(0);
+#ifdef __ANDROID__
+  /* Every Vulkan call the fallback path makes is reachable through this wrapper, and each one
+   * dereferences a volk pointer that a 1.1 driver may have left null -- a SIGSEGV at 0x0 with an
+   * otherwise empty backtrace. Trace the fallback's own calls so the crash log says which one
+   * fired instead of leaving it to be guessed. */
+  {
+    static const bool log_enabled = []() {
+      char value[PROP_VALUE_MAX] = {};
+      return __system_property_get("debug.blender.log", value) > 0 && atoi(value) != 0;
+    }();
+    static int counter = 0;
+    if (log_enabled && (counter++ % 20) == 0) {
+      __android_log_print(ANDROID_LOG_WARN,
+                          "blender-rpfb",
+                          "begin_render_pass #%d rp=%p fb=%p clear=%u",
+                          counter,
+                          (const void *)vk_render_pass,
+                          (const void *)vk_framebuffer,
+                          uint32_t(clear_values.size()));
+    }
+  }
+#endif
   functions->vkCmdBeginRenderPass(vk_command_buffer_, &begin_info, inline_contents);
 }
 
