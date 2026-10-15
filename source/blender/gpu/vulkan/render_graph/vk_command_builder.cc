@@ -97,7 +97,7 @@ bool VKCommandBuilder::group_touches_open_scope(const VKRenderGraph &render_grap
    * held-open boundary is computed against the wrong assumption. Closing whenever the ending group
    * carries image barriers is the conservative approximation of that, and it may fire often enough
    * to leave little on the table. Worth measuring before investing in the general form. */
-  const Span<const VKImageMemoryBarrier> post_image_barriers =
+  const Span<VKImageMemoryBarrier> post_image_barriers =
       vk_image_memory_barriers_.as_span().slice(group_post_barriers_[group_index]);
   if (!post_image_barriers.is_empty()) {
     return true;
