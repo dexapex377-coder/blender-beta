@@ -46,6 +46,19 @@ jobs:
                     --jq '.workflow_runs[0].id')
           fi
           [ -n "$RID" ] || { echo "ERROR: no successful build-native.yml run to package"; exit 1; }
+          # Fail now, with the reason, rather than at the download step with
+          # 'Unable to download artifact(s): Not Found'. That message looks like
+          # the artifact is missing when the real problem is the run: either the
+          # id was passed by hand and is wrong, or the run it names did not
+          # succeed, so it has no gradle-stage to hand over.
+          RID_STATUS=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RID" \
+                          --jq '.conclusion // "unknown"' 2>/dev/null || echo "unreachable")
+          if [ "$RID_STATUS" != "success" ]; then
+            echo "ERROR: native run $RID concluded '$RID_STATUS', not success."
+            echo "       A failed native run has no staged artifact to package."
+            echo "       Find a successful run with: gh run list --repo $GITHUB_REPOSITORY --workflow build-native.yml --limit 10"
+            exit 1
+          fi
           echo "Packaging native run $RID"
           echo "run_id=$RID" >> "$GITHUB_OUTPUT"
 
@@ -151,6 +164,33 @@ jobs:
       # entry carries <preview>1</preview>); nttld/setup-ndk@v1 will not resolve a preview
       # revision from a plain semver and the job dies immediately with
       # 'Attempting to download 30.0.14904198... Error: Unexpected HTTP response: 404'.
+      # Download the NDK first with retries, into the location setup-ndk reads.
+      #
+      # Measured on a run where every other artifact in the job downloaded fine:
+      # 'Setup NDK' died with 'Unexpected HTTP response: 404' from the r30 zip while
+      # the native job, which asks for the same r30, passed. The package exists --
+      # repository2-3.xml lists it on the stable channel -- so the 404 was the
+      # runner's network, not Google's. nttld/setup-ndk@v1 retries once and gives
+      # up; curl --retry does not. The file lands in the cache either way, so the
+      # step below finds it already there and does not download it again.
+      #
+      # Keep this and the step below on 'r30'. r29 is not a fallback: its
+      # libc++_shared.so does not export _ZNSt6__ndk113__hash_memoryEPKvm, which the
+      # prebuilt abseil and draco archives reference, so the APK ships a libc++
+      # libblender.so was not linked against and dlopen fails at launch.
+      - name: Pre-download NDK r30
+        run: |
+          for i in 1 2 3 4 5 6; do
+            echo "attempt $i"
+            curl -fSL --retry 5 --retry-delay 5 --retry-all-errors \
+              -o android-ndk-r30-linux.zip \
+              https://dl.google.com/android/repository/android-ndk-r30-linux.zip \
+              && break
+            echo "failed, sleeping 10s"
+            sleep 10
+          done
+          test -s android-ndk-r30-linux.zip || { echo "NDK download failed"; exit 1; }
+          echo "downloaded $(stat -c%s android-ndk-r30-linux.zip) bytes"
       - name: Setup NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
