@@ -9,6 +9,7 @@ set(INC
   ../editors/include
   ../editors/space_view3d
   ../gpu/intern
+  ../gpu/vulkan
   ../makesrna
   ../render/intern
   ../compositor
