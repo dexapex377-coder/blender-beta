@@ -11,6 +11,7 @@
 #include "BLI_math_matrix.hh"
 #ifdef __ANDROID__
 #  include "BLI_android_knobs.hh"
+#  include "vk_state_manager.hh"
 #endif
 #include "GPU_batch_utils.hh"
 #include "GPU_capabilities.hh"

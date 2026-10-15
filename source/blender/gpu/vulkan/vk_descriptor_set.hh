@@ -194,6 +194,17 @@ class VKDescriptorSetTracker {
    */
   void upload_descriptor_sets();
 
+  /**
+   * Drop the cached descriptor set so the next update allocates a fresh one.
+   *
+   * When a descriptor pool is recycled and reset by the submission thread, every
+   * descriptor set that came from it becomes invalid, including the one this
+   * tracker caches for reuse. Writing into a stale set makes the MTK driver
+   * crash (null-deref inside upload_descriptor_sets, SIGSEGV fault addr 0x38).
+   * Ported from kronos3D alongside the descriptor pool fix.
+   */
+  void invalidate();
+
  private:
   /**
    * Add resources of the descriptor set to the resource access info.

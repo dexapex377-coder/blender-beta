@@ -317,8 +317,14 @@ void VKDescriptorSetTracker::update_resource_access_info(
 
 /** \} */
 
-void VKDescriptorSetTracker::upload_descriptor_sets()
+void VKDescriptorSetTracker::invalidate()
 {
+  /* Drop the cached handle so the next update_descriptor_set() re-allocates from a
+   * fresh pool rather than reusing a set whose pool was recycled. */
+  descriptor_sets.vk_descriptor_set = VK_NULL_HANDLE;
+}
+
+void VKDescriptorSetTracker::upload_descriptor_sets(){
   descriptor_sets.upload_descriptor_sets();
   vk_descriptor_set_layout_ = VK_NULL_HANDLE;
 }
