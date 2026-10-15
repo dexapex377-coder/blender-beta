@@ -11,14 +11,6 @@
 #include "BLI_math_matrix.hh"
 #ifdef __ANDROID__
 #  include "BLI_android_knobs.hh"
-
-/* Forward declarations: the helper lives in vk_descriptor_pools.cc, which has the
- * includes this file cannot reach without a CMake reconfigure. */
-namespace blender::gpu {
-class VKContext;
-struct AfterPoolDiscard;
-AfterPoolDiscard sync_after_pool_discard(VKContext &context);
-}  // namespace blender::gpu
 #endif
 #include "GPU_batch_utils.hh"
 #include "GPU_capabilities.hh"
@@ -1410,15 +1402,9 @@ void ShadowModule::render(View &view, int2 extent)
        * ready when sampled) and stale counters. GPU_finish() is a full barrier:
        * it waits for every previously submitted command to complete on the GPU.
        *
-       * This is distinct from the descriptor pool fix: that one stops the session
-       * from crashing every ~2 minutes; this one stops the shadow pass from
-       * silently producing nothing. Both are upstream bugs that kronos3D hit and
-       * fixed; neither is in a vanilla Blender tree.
-       *
-       * The sync itself lives in VKDescriptorPools::sync_after_pool_discard(), which
-       * already has the includes this file cannot reach without adding gpu/vulkan
-       * to the draw target's include path. */
-      blender::gpu::sync_after_pool_discard(*VKContext::get());
+       * The state_manager invalidation is already done inside discard_active_pool()
+       * on the GPU side when pools are exhausted; this is the CPU-side barrier. */
+      GPU_finish();
       statistics_buf_.current().async_flush_to_host();
       statistics_buf_.current().read();
       const ShadowStatistics &post_stats = statistics_buf_.current();
