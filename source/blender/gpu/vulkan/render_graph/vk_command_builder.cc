@@ -660,12 +660,16 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
        * transfer, a compute write, a sampled read or an input attachment, so only groups provably
        * unrelated to the attachments stay open. The alternative -- closing on every boundary -- is
        * what this path did, and it cost a tile flush per boundary: measured on the Moto, 29.8% of
-       * scopes repeat the previous one and they carry 31.3% of the pixel traffic. */
+       * scopes repeat the previous one and they carry 31.3% of the pixel traffic.
+       *
+       * Falls through rather than continuing the loop. The group's post barriers still have to be
+       * issued: skipping them with a continue dropped synchronization the render graph had
+       * generated, and the driver was handed a command stream it had no contract for -- that is
+       * what killed the process, not the pass being open. Whether those barriers are *correct*
+       * with the pass held open is a separate question this does not answer. */
       scope_fused++;
-      continue;
     }
-
-    if (rendering_active) {
+    else if (rendering_active) {
       /* Suspend rendering as the next node group will contain data transfer/dispatch commands.
        */
       rendering_active = false;
