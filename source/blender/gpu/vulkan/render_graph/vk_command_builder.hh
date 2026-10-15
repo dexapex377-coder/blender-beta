@@ -59,9 +59,21 @@ class VKCommandBuilder {
   uint32_t scope_load_none = 0;
   /** Frames since the last report; the totals are averaged over this many. */
   uint32_t scope_report_frames = 0;
+  /** Group boundaries where the render pass stayed open. Reported so the effect is measurable. */
+  uint32_t scope_fused = 0;
 
   /** Android only. One line per scope, behind the android.perf switch. */
   void scope_detail(const VKBeginRenderingData &begin_data) const;
+
+  /**
+   * Whether any node in `next_group` reads or writes an image that is an attachment of the open
+   * render scope. Conservative: true whenever there is not a positive proof of independence, so a
+   * false result means the group provably touches none of the attachments.
+   */
+  bool group_touches_open_scope(const VKRenderGraph &render_graph,
+                                NodeHandle rendering_scope,
+                                IndexRange next_group,
+                                Span<NodeHandle> node_handles) const;
 
   struct Barrier {
     /** Index range into `VKCommandBuilder::vk_buffer_memory_barriers_` */

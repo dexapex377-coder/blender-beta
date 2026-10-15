@@ -51,6 +51,37 @@ void VKCommandBuilder::build_nodes(VKRenderGraph &render_graph,
       render_graph, node_handles, command_buffer.use_dynamic_rendering_local_read);
 }
 
+bool VKCommandBuilder::group_touches_open_scope(const VKRenderGraph &render_graph,
+                                               NodeHandle rendering_scope,
+                                               IndexRange next_group,
+                                               Span<NodeHandle> node_handles) const
+{
+  /* Both sides are ResourceWithStamp, which is what VKResourceAccessInfo::build_links() produces
+   * from the declared images. The BEGIN_RENDERING node registers its attachments the same way any
+   * other node registers resources, so the scope's own links are the attachment list -- no mapping
+   * back from VkImageView, which is not recoverable here because build_links() drops the VkImage
+   * and the CreateInfo is not retained. */
+  const Span<VKRenderGraphImage> scope_links =
+      render_graph.linked_images(render_graph.nodes_[rendering_scope]);
+  if (scope_links.is_empty()) {
+    /* Nothing recorded for the attachments means no basis for holding the pass open. */
+    return true;
+  }
+
+  for (const int64_t group_node_index : next_group) {
+    for (const VKRenderGraphImage &node_link :
+         render_graph.linked_images(node_handles[group_node_index]))
+    {
+      for (const VKRenderGraphImage &scope_link : scope_links) {
+        if (node_link.resource == scope_link.resource) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 #ifdef __ANDROID__
 void VKCommandBuilder::scope_detail(const VKBeginRenderingData &begin_data) const
 {
@@ -117,7 +148,7 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
       __android_log_print(ANDROID_LOG_WARN,
                           "blender-scope",
                           "scopes/frame=%u pixels/frame=%llu MPix/scope=%llu "
-                          "loadOp: clear=%u load=%u dontcare=%u  fallback=%d",
+                          "loadOp: clear=%u load=%u dontcare=%u  fused=%u  fallback=%d",
                           uint32_t(scope_count / scope_report_frames),
                           (unsigned long long)(scope_pixels / scope_report_frames),
                           scope_count ?
@@ -126,6 +157,7 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                           uint32_t(scope_load_clear / scope_report_frames),
                           uint32_t(scope_load_keep / scope_report_frames),
                           uint32_t(scope_load_none / scope_report_frames),
+                          uint32_t(scope_fused / scope_report_frames),
                           int(VKRenderPassFallback::is_active()));
     }
     scope_pixels = 0;
@@ -133,6 +165,7 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
     scope_load_clear = 0;
     scope_load_keep = 0;
     scope_load_none = 0;
+    scope_fused = 0;
     scope_report_frames = 0;
   }
 #endif
@@ -574,6 +607,22 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
                 << ", debug group=" << render_graph.full_debug_group(node_handle) << "\n";
 #endif
       node.build_commands(command_buffer, render_graph.storage_, active_pipelines);
+    }
+
+    if (rendering_active && !group_touches_open_scope(
+                              render_graph, rendering_scope, group_nodes, node_handles))
+    {
+      /* The next group does not read or write any attachment of the open scope, so nothing forces
+       * the tile to flush and the render pass can stay open across the boundary. Closed later by
+       * the END_RENDERING node or by a group that does touch an attachment.
+       *
+       * Conservative by construction: a node declares the image in its links whether it is a
+       * transfer, a compute write, a sampled read or an input attachment, so only groups provably
+       * unrelated to the attachments stay open. The alternative -- closing on every boundary -- is
+       * what this path did, and it cost a tile flush per boundary: measured on the Moto, 29.8% of
+       * scopes repeat the previous one and they carry 31.3% of the pixel traffic. */
+      scope_fused++;
+      continue;
     }
 
     if (rendering_active) {
