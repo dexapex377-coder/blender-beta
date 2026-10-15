@@ -339,7 +339,12 @@ void VKCommandBufferWrapper::begin_render_pass(VkRenderPass vk_render_pass,
   begin_info.renderArea = render_area;
   begin_info.clearValueCount = uint32_t(clear_values.size());
   begin_info.pClearValues = clear_values.data();
-  functions->vkCmdBeginRenderPass(vk_command_buffer_, &begin_info, VK_NULL_HANDLE);
+  /* Inline contents. Spelled as a cast rather than VK_SUBPASS_CONTENTS_INLINE so it does not depend
+   * on which revision of the Vulkan headers the NDK ships: VK_NULL_HANDLE expands to nullptr under
+   * C++11 and later, and nullptr cannot initialise the VkSubpassContents enum that this parameter
+   * became when VK_KHR_maintenance1 promoted it out of void*. The cast is the same value, 0. */
+  const VkSubpassContents inline_contents = static_cast<VkSubpassContents>(0);
+  functions->vkCmdBeginRenderPass(vk_command_buffer_, &begin_info, inline_contents);
 }
 
 void VKCommandBufferWrapper::end_render_pass()
