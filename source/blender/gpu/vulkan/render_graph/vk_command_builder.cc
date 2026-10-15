@@ -68,12 +68,16 @@ bool VKCommandBuilder::group_touches_open_scope(const VKRenderGraph &render_grap
     return true;
   }
 
+  /* Compare the handle, never the stamp. build_links() calls get_image_and_increase_stamp() for
+   writes, so a group that writes an attachment comes back with a bumped stamp and would compare
+   unequal -- the scope would then be held open across a write to its own attachment, precisely the
+   case that has to close. The stamp tracks version; the handle identifies the image. */
   for (const int64_t group_node_index : next_group) {
     for (const VKRenderGraphImage &node_link :
          render_graph.linked_images(node_handles[group_node_index]))
     {
       for (const VKRenderGraphImage &scope_link : scope_links) {
-        if (node_link.resource == scope_link.resource) {
+        if (node_link.resource.handle == scope_link.resource.handle) {
           return true;
         }
       }
