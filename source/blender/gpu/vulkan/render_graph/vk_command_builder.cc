@@ -54,7 +54,8 @@ void VKCommandBuilder::build_nodes(VKRenderGraph &render_graph,
 bool VKCommandBuilder::group_touches_open_scope(const VKRenderGraph &render_graph,
                                                NodeHandle rendering_scope,
                                                IndexRange next_group,
-                                               Span<NodeHandle> node_handles) const
+                                               Span<NodeHandle> node_handles,
+                                               int64_t group_index) const
 {
   /* Both sides are ResourceWithStamp, which is what VKResourceAccessInfo::build_links() produces
    * from the declared images. The BEGIN_RENDERING node registers its attachments the same way any
@@ -83,7 +84,42 @@ bool VKCommandBuilder::group_touches_open_scope(const VKRenderGraph &render_grap
       }
     }
   }
+
+  /* Barriers issued at this boundary come from the group that is ending, not from the next one, so
+   * they need checking separately. The barrier generator assumes a render scope is closed at every
+   * group boundary: holding the pass open lets a barrier transition the layout of an image that is
+   * an attachment of the still-open scope, which is not a legal command sequence. That is what
+   * killed the process on the first frame -- the commands are ours, and the undefined behaviour
+   * they provoke is not the driver's fault.
+   *
+   * So this is not only a missing check, which is the part worth being honest about: the barrier
+   * generator would have to know the pass is open, otherwise every barrier it emits across a
+   * held-open boundary is computed against the wrong assumption. Closing whenever the ending group
+   * carries image barriers is the conservative approximation of that, and it may fire often enough
+   * to leave little on the table. Worth measuring before investing in the general form. */
+  const Span<const VKImageMemoryBarrier> post_image_barriers =
+      vk_image_memory_barriers_.as_span().slice(group_post_barriers_[group_index]);
+  if (!post_image_barriers.is_empty()) {
+    return true;
+  }
   return false;
+}
+
+bool VKCommandBuilder::hold_pass_fusion_disabled()
+{
+#ifdef __ANDROID__
+  /* Escape hatch. Holding a render pass open across a group boundary depends on the driver
+   * tolerating whatever the group records; the MediaTek one kills the process on the first frame
+   * if it does not. Keeping this switchable means a driver that turns out to disagree can be
+   * stepped back from logcat without a 170 MB rebuild. */
+  static const bool disabled = []() {
+    char value[PROP_VALUE_MAX] = {};
+    return __system_property_get("debug.blender.nopassfusion", value) > 0 && atoi(value) != 0;
+  }();
+  return disabled;
+#else
+  return false;
+#endif
 }
 
 #ifdef __ANDROID__
@@ -613,8 +649,8 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
       node.build_commands(command_buffer, render_graph.storage_, active_pipelines);
     }
 
-    if (rendering_active && !group_touches_open_scope(
-                              render_graph, rendering_scope, group_nodes, node_handles))
+    if (rendering_active && !hold_pass_fusion_disabled() &&
+        !group_touches_open_scope(render_graph, rendering_scope, group_nodes, node_handles, group_index))
     {
       /* The next group does not read or write any attachment of the open scope, so nothing forces
        * the tile to flush and the render pass can stay open across the boundary. Closed later by

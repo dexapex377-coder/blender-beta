@@ -65,6 +65,9 @@ class VKCommandBuilder {
   /** Android only. One line per scope, behind the android.perf switch. */
   void scope_detail(const VKBeginRenderingData &begin_data) const;
 
+  /** True when debug.blender.nopassfusion disables holding a pass open. Android only. */
+  static bool hold_pass_fusion_disabled();
+
   /**
    * Whether any node in `next_group` reads or writes an image that is an attachment of the open
    * render scope. Conservative: true whenever there is not a positive proof of independence, so a
@@ -73,7 +76,8 @@ class VKCommandBuilder {
   bool group_touches_open_scope(const VKRenderGraph &render_graph,
                                 NodeHandle rendering_scope,
                                 IndexRange next_group,
-                                Span<NodeHandle> node_handles) const;
+                                Span<NodeHandle> node_handles,
+                                int64_t group_index) const;
 
   struct Barrier {
     /** Index range into `VKCommandBuilder::vk_buffer_memory_barriers_` */
