@@ -1409,11 +1409,13 @@ void ShadowModule::render(View &view, int2 extent)
       statistics_buf_.current().read();
       const ShadowStatistics &post_stats = statistics_buf_.current();
       ANDROID_KNOB_LOG("eevee.shadow",
-                      "SHADOW-RENDER post loop=%d rndr=%d alloc=%d upd=%d",
+                      "SHADOW-RENDER post loop=%d rndr=%d alloc=%d upd=%d used=%d pool=%d",
                       loop_count,
                       post_stats.page_rendered_count,
                       post_stats.page_allocated_count,
-                      post_stats.page_update_count);
+                      post_stats.page_update_count,
+                      post_stats.page_used_count,
+                      int(shadow_page_len_));
 #endif
 
       if (use_flush) {
