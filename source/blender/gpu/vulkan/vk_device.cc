@@ -123,6 +123,10 @@ void VKDevice::deinit()
   }
   pipelines.write_to_disk();
   pipelines.free_data(*this);
+  if (VKRenderPassFallback::is_active()) {
+    /* Must happen before the device handle is cleared below. */
+    render_pass_fallback.deinit();
+  }
   descriptor_set_layouts_.deinit();
   vma_pools.deinit(*this);
   mem_allocator_ = VK_NULL_HANDLE;
@@ -181,6 +185,21 @@ void VKDevice::init(GHOST_IContext *ghost_context)
 
   resources.use_dynamic_rendering_local_read = extensions_.dynamic_rendering_local_read;
   orphaned_data.timeline_ = 0;
+
+  /* VK_KHR_dynamic_rendering is not always present even on hardware that supports Vulkan 1.3 --
+   * MIUI's Vulkan configuration drops it from otherwise capable Mali drivers. Decide once here
+   * rather than per render scope, and keep the caches ready either way. */
+  const bool has_dynamic_rendering = (functions.vkCmdBeginRenderingKHR != nullptr) &&
+                                     (functions.vkCmdEndRenderingKHR != nullptr);
+  VKRenderPassFallback::set_active(!has_dynamic_rendering);
+  if (!has_dynamic_rendering) {
+    /* Local read is built on dynamic rendering (VK_EXT_dynamic_rendering_local_read), so it has to
+     * go with it; a driver advertising it while withholding the base capability would otherwise
+     * produce input attachments the fallback cannot express. */
+    extensions_.dynamic_rendering_local_read = false;
+    extensions_.dynamic_rendering_unused_attachments = false;
+    render_pass_fallback.init(vk_device_, functions);
+  }
 
   init_submission_thread();
   is_initialized_ = true;

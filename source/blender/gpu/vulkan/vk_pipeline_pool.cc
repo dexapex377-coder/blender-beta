@@ -245,7 +245,10 @@ VkPipeline VKPipelineMap<VKGraphicsInfo>::create(const VKGraphicsInfo &graphics_
 {
   VKDevice &device = VKBackend::get().device;
   const VKExtensions &extensions = device.extensions_get();
-  if (extensions.graphics_pipeline_library) {
+  if (extensions.graphics_pipeline_library && !VKRenderPassFallback::is_active()) {
+    /* The library path builds its VkGraphicsPipelineCreateInfo around
+     * VkPipelineRenderingCreateInfo rather than a render pass, which has no fallback. Full
+     * pipelines are built instead; more objects, same rendered result. */
     return create_graphics_pipeline_libs(graphics_info, vk_pipeline_cache, vk_pipeline_base, name);
   }
   return create_graphics_pipeline_no_libs(

@@ -26,6 +26,10 @@
 
 namespace blender::gpu {
 
+/* Zero-initialized before any device exists, so a render scope built during backend setup takes the
+ * dynamic rendering path by default. */
+bool VKRenderPassFallback::is_active_ = false;
+
 VkRenderPass VKRenderPassFallback::render_pass_from_key(const RenderPassKey &key)
 {
   std::scoped_lock lock(mutex_);

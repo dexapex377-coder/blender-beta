@@ -23,6 +23,7 @@ void VKDiscardPool::move_data(VKDiscardPool &src_pool, TimelineValue timeline)
   src_pool.buffer_views_.update_timeline(timeline);
   src_pool.buffers_.update_timeline(timeline);
   src_pool.image_views_.update_timeline(timeline);
+  src_pool.framebuffers_.update_timeline(timeline);
   src_pool.images_.update_timeline(timeline);
   src_pool.shader_modules_.update_timeline(timeline);
   src_pool.pipelines_.update_timeline(timeline);
@@ -35,6 +36,7 @@ void VKDiscardPool::move_data(VKDiscardPool &src_pool, TimelineValue timeline)
   buffer_views_.extend(std::move(src_pool.buffer_views_));
   buffers_.extend(std::move(src_pool.buffers_));
   image_views_.extend(std::move(src_pool.image_views_));
+  framebuffers_.extend(std::move(src_pool.framebuffers_));
   images_.extend(std::move(src_pool.images_));
   shader_modules_.extend(std::move(src_pool.shader_modules_));
   pipelines_.extend(std::move(src_pool.pipelines_));
@@ -66,6 +68,12 @@ void VKDiscardPool::discard_image_view(VkImageView vk_image_view)
 {
   std::scoped_lock mutex(mutex_);
   image_views_.append_timeline(timeline_, vk_image_view);
+}
+
+void VKDiscardPool::discard_framebuffer(VkFramebuffer vk_framebuffer)
+{
+  std::scoped_lock mutex(mutex_);
+  framebuffers_.append_timeline(timeline_, vk_framebuffer);
 }
 
 void VKDiscardPool::discard_buffer(ResourceHandle buffer_handle, VmaAllocation vma_allocation)
@@ -118,6 +126,9 @@ void VKDiscardPool::destroy_discarded_resources(VKDevice &device, TimelineValue 
                                [&](VkImage vk_image) { device.resources.remove_image(vk_image); });
   image_views_.remove_old(current_timeline, [&](VkImageView vk_image_view) {
     device.functions.vkDestroyImageView(device.vk_handle(), vk_image_view, nullptr);
+  });
+  framebuffers_.remove_old(current_timeline, [&](VkFramebuffer vk_framebuffer) {
+    device.functions.vkDestroyFramebuffer(device.vk_handle(), vk_framebuffer, nullptr);
   });
 
   allocations_.remove_old(current_timeline, [&](VmaAllocation vma_allocation) {
@@ -179,6 +190,7 @@ std::ostream &operator<<(std::ostream &os, const VKDiscardPool &discard_pool)
 {
   if (discard_pool.images_.is_empty() && discard_pool.buffers_.is_empty() &&
       discard_pool.image_views_.is_empty() && discard_pool.buffer_views_.is_empty() &&
+      discard_pool.framebuffers_.is_empty() &&
       discard_pool.shader_modules_.is_empty() && discard_pool.pipeline_layouts_.is_empty() &&
       discard_pool.descriptor_pools_.is_empty())
   {

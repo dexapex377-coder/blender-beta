@@ -151,6 +151,15 @@ class VKCommandBufferInterface {
   /* VK_KHR_dynamic_rendering */
   virtual void begin_rendering(const VkRenderingInfo *p_rendering_info) = 0;
   virtual void end_rendering() = 0;
+  /* Vulkan 1.0 core, used by the render pass fallback when VK_KHR_dynamic_rendering is absent.
+   * The core functions rather than the KHR aliases on purpose: those come from
+   * VK_KHR_maintenance1, which is not a capability Blender requires, so they can be null on a
+   * driver that otherwise meets every requirement. */
+  virtual void begin_render_pass(VkRenderPass vk_render_pass,
+                                 VkFramebuffer vk_framebuffer,
+                                 const VkRect2D &render_area,
+                                 Span<VkClearValue> clear_values) = 0;
+  virtual void end_render_pass() = 0;
   /* VK_EXT_debug_utils */
   virtual void begin_debug_utils_label(const VkDebugUtilsLabelEXT *vk_debug_utils_label) = 0;
   virtual void end_debug_utils_label() = 0;
@@ -288,6 +297,11 @@ class VKCommandBufferWrapper : public VKCommandBufferInterface {
   void reset_query_pool(VkQueryPool, uint32_t first_query, uint32_t query_count) override;
   void begin_rendering(const VkRenderingInfo *p_rendering_info) override;
   void end_rendering() override;
+  void begin_render_pass(VkRenderPass vk_render_pass,
+                         VkFramebuffer vk_framebuffer,
+                         const VkRect2D &render_area,
+                         Span<VkClearValue> clear_values) override;
+  void end_render_pass() override;
   void begin_debug_utils_label(const VkDebugUtilsLabelEXT *vk_debug_utils_label) override;
   void end_debug_utils_label() override;
 

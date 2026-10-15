@@ -10,6 +10,8 @@
 
 #include "vk_node_info.hh"
 
+#include "../vk_render_pass_fallback.hh"
+
 namespace blender::gpu::render_graph {
 
 /**
@@ -60,6 +62,10 @@ class VKEndRenderingNode : public VKNodeInfo<VKNodeType::END_RENDERING,
                       Span<uint8_t> /*storage_push_constants*/,
                       VKBoundPipelines & /*r_bound_pipelines*/) override
   {
+    if (VKRenderPassFallback::is_active()) {
+      end_rendering_fallback(command_buffer);
+      return;
+    }
     command_buffer.end_rendering();
   }
 };

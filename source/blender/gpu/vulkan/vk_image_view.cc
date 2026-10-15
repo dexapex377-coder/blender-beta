@@ -64,7 +64,16 @@ VKImageView::VKImageView(VKImageView &&other) : info(other.info)
 VKImageView::~VKImageView()
 {
   if (vk_image_view_ != VK_NULL_HANDLE) {
-    VKDiscardPool::discard_pool_get().discard_image_view(vk_image_view_);
+    VKDiscardPool &pool = VKDiscardPool::discard_pool_get();
+    if (VKRenderPassFallback::is_active()) {
+      /* The render pass fallback caches a VkFramebuffer per view set. Drop any cached framebuffer
+       * wrapping this view before the view is queued for destruction, otherwise a later view that
+       * recycles the handle would match a stale entry and the render scope would sample the wrong
+       * image. */
+      VKBackend::get()
+          .device.render_pass_fallback.discard_framebuffers_for_view(vk_image_view_, pool);
+    }
+    pool.discard_image_view(vk_image_view_);
     vk_image_view_ = VK_NULL_HANDLE;
   }
   vk_format_ = VK_FORMAT_UNDEFINED;

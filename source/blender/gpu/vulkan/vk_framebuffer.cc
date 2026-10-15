@@ -9,6 +9,7 @@
 #include "vk_framebuffer.hh"
 #include "vk_backend.hh"
 #include "vk_context.hh"
+#include "vk_render_pass_fallback.hh"
 #include "vk_state_manager.hh"
 #include "vk_texture.hh"
 
@@ -572,6 +573,15 @@ void VKFrameBuffer::rendering_ensure_dynamic_rendering(VKContext &context,
   const VKDevice &device = VKBackend::get().device;
   const bool supports_local_read = device.extensions_get().dynamic_rendering_local_read;
 
+  /* An attachment with no image view has to be reported as VK_FORMAT_UNDEFINED when the render
+   * pass fallback is in use: the fallback maps UNDEFINED to VK_ATTACHMENT_UNUSED and omits the
+   * view from the VkFramebuffer, whereas a real format with a null view would build a framebuffer
+   * with a null attachment. Dynamic rendering gets the same handling from
+   * VK_EXT_dynamic_rendering_unused_attachments. */
+  const bool allow_unused_attachments =
+      device.extensions_get().dynamic_rendering_unused_attachments ||
+      VKRenderPassFallback::is_active();
+
   depth_attachment_format_ = VK_FORMAT_UNDEFINED;
   stencil_attachment_format_ = VK_FORMAT_UNDEFINED;
 
@@ -665,7 +675,7 @@ void VKFrameBuffer::rendering_ensure_dynamic_rendering(VKContext &context,
           layer_base,
           uint32_t(max_ii(layer_count - layer_base, 1))}});
     color_attachment_formats_.append(
-        (!extensions.dynamic_rendering_unused_attachments && vk_image_view == VK_NULL_HANDLE) ?
+        (!allow_unused_attachments && vk_image_view == VK_NULL_HANDLE) ?
             VK_FORMAT_UNDEFINED :
             vk_format);
   }
@@ -707,8 +717,7 @@ void VKFrameBuffer::rendering_ensure_dynamic_rendering(VKContext &context,
                                   static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT)};
       depth_image_view = depth_texture.image_view_get(image_view_info).vk_handle();
     }
-    VkFormat vk_format = (!extensions.dynamic_rendering_unused_attachments &&
-                          depth_image_view == VK_NULL_HANDLE) ?
+    VkFormat vk_format = (!allow_unused_attachments && depth_image_view == VK_NULL_HANDLE) ?
                              VK_FORMAT_UNDEFINED :
                              to_vk_format(depth_texture.device_format_get());
 
@@ -749,6 +758,17 @@ void VKFrameBuffer::rendering_ensure_dynamic_rendering(VKContext &context,
              static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT),
          {uint32_t(attachment.mip), 1, uint32_t(max_ii(attachment.layer, 0)), 1}});
     break;
+  }
+
+  /* Dynamic rendering carries the formats in VkPipelineRenderingCreateInfo instead, but the render
+   * pass fallback has to build a VkRenderPass from them, and the framebuffer it wraps needs the
+   * same formats. Copy the ones computed above; only read when the fallback is active. */
+  if (VKRenderPassFallback::is_active()) {
+    for (int i = 0; i < color_attachment_size && i < 8; i++) {
+      begin_rendering.node_data.color_formats[i] = color_attachment_formats_[i];
+    }
+    begin_rendering.node_data.depth_format = depth_attachment_format_;
+    begin_rendering.node_data.stencil_format = stencil_attachment_format_;
   }
 
   context.render_graph().add_node(begin_rendering);

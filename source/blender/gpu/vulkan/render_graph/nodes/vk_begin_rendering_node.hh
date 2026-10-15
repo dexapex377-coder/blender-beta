@@ -11,6 +11,8 @@
 #include "render_graph/vk_resource_access_info.hh"
 #include "vk_node_info.hh"
 
+#include "../vk_render_pass_fallback.hh"
+
 namespace blender::gpu::render_graph {
 
 /**
@@ -21,6 +23,14 @@ struct VKBeginRenderingData {
   VkRenderingAttachmentInfo depth_attachment;
   VkRenderingAttachmentInfo stencil_attachment;
   VkRenderingInfoKHR vk_rendering_info;
+
+  /* Dynamic rendering declares the attachment formats once, in
+   * VkPipelineRenderingCreateInfo at pipeline creation; the rendering info carries only views and
+   * layouts. A VkRenderPass has to be built per format combination instead, so the fallback needs
+   * them here. Kept in step with the attachment array above by the producer. */
+  VkFormat color_formats[8];
+  VkFormat depth_format = VK_FORMAT_UNDEFINED;
+  VkFormat stencil_format = VK_FORMAT_UNDEFINED;
 };
 
 struct VKBeginRenderingCreateInfo {
@@ -102,6 +112,10 @@ class VKBeginRenderingNode : public VKNodeInfo<VKNodeType::BEGIN_RENDERING,
     }
     if (data.vk_rendering_info.pStencilAttachment) {
       data.vk_rendering_info.pStencilAttachment = &data.stencil_attachment;
+    }
+    if (VKRenderPassFallback::is_active()) {
+      begin_rendering_fallback(command_buffer, data);
+      return;
     }
     command_buffer.begin_rendering(&data.vk_rendering_info);
   }

@@ -24,6 +24,7 @@
 #include "vk_descriptor_set_layouts.hh"
 #include "vk_memory_pool.hh"
 #include "vk_pipeline_pool.hh"
+#include "vk_render_pass_fallback.hh"
 #include "vk_resource_pool.hh"
 #include "vk_samplers.hh"
 #include "vk_vertex_attribute_object.hh"
@@ -262,6 +263,10 @@ class VKDevice : public NonCopyable {
   /* Workarounds */
   VKWorkarounds workarounds_;
   VKExtensions extensions_;
+
+  /** Only used when VK_KHR_dynamic_rendering is missing; owns the cached VkRenderPass and
+   * VkFramebuffer objects the render scope falls back to. */
+  VKRenderPassFallback render_pass_fallback;
 
   std::string glsl_vert_patch_;
   std::string glsl_geom_patch_;

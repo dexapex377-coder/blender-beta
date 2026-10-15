@@ -30,15 +30,43 @@
 namespace blender::gpu {
 
 class VKDiscardPool;
+class VKCommandBufferInterface;
 
 namespace render_graph {
 struct VKBeginRenderingData;
-}
+
+/**
+ * Begin/end a render scope through a VkRenderPass instead of dynamic rendering. Defined in the .cc
+ * (they need the concrete VKBeginRenderingData) and called from the begin/end rendering nodes when
+ * VKRenderPassFallback::is_active().
+ */
+void begin_rendering_fallback(VKCommandBufferInterface &command_buffer,
+                              const VKBeginRenderingData &data);
+void end_rendering_fallback(VKCommandBufferInterface &command_buffer);
+}  // namespace render_graph
 
 class VKRenderPassFallback {
  private:
   VkDevice vk_device_ = VK_NULL_HANDLE;
   const VolkDeviceTable *functions_ = nullptr;
+
+ public:
+  /**
+   * True when the device lacks VK_KHR_dynamic_rendering and every render scope must go through
+   * VkRenderPass instead. Set once at device init, read on the submission thread, so it is a
+   * plain flag rather than a device query.
+   */
+  static bool is_active()
+  {
+    return is_active_;
+  }
+  static void set_active(bool active)
+  {
+    is_active_ = active;
+  }
+
+ private:
+  static bool is_active_;
 
   /* POD keys: zero-initialized then filled, hashed/compared over their bytes so
    * padding stays deterministic. */

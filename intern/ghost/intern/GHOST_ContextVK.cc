@@ -359,6 +359,11 @@ struct GHOST_InstanceVK {
   VkInstance vk_instance = VK_NULL_HANDLE;
   VkPhysicalDevice vk_physical_device = VK_NULL_HANDLE;
 
+  /** Version the instance was created with, already capped to what the loader reports. Needed when
+   * the device is created to tell "dynamic rendering is core here" from "only the KHR extension
+   * would do". */
+  uint32_t api_version = VK_API_VERSION_1_0;
+
   GHOST_ExtensionsVK extensions;
 
   std::optional<GHOST_DeviceVK> device;
@@ -449,6 +454,7 @@ struct GHOST_InstanceVK {
     };
 
     VK_CHECK(volk::vkCreateInstance(&vk_instance_create_info, nullptr, &vk_instance), false);
+    api_version = vulkan_api_version;
     return true;
   }
 
@@ -702,11 +708,23 @@ struct GHOST_InstanceVK {
       feature_struct_ptr.push_back(&provoking_vertex_features);
     }
 
-    /* Enable dynamic rendering. */
-    VkPhysicalDeviceDynamicRenderingFeatures dynamic_rendering = {};
-    dynamic_rendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
-    dynamic_rendering.dynamicRendering = VK_TRUE;
-    feature_struct_ptr.push_back(&dynamic_rendering);
+    /* Enable dynamic rendering, but only where it exists.
+     *
+     * VkPhysicalDeviceDynamicRenderingFeatures is a Vulkan 1.3 struct and asking for
+     * dynamicRendering on a device that has neither the 1.3 core feature nor
+     * VK_KHR_dynamic_rendering makes vkCreateDevice fail, taking the whole context down.
+     * MIUI reports Vulkan 1.1 and strips the extension from otherwise capable Mali drivers, so
+     * this has to be conditional rather than a fixed entry in the feature chain. When it is off,
+     * the GPU backend renders through VkRenderPass instead (VKRenderPassFallback). */
+    const bool has_dynamic_rendering = (api_version >= VK_API_VERSION_1_3) ||
+                                       device.extensions.is_enabled(
+                                           VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+    if (has_dynamic_rendering) {
+      VkPhysicalDeviceDynamicRenderingFeatures dynamic_rendering = {};
+      dynamic_rendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+      dynamic_rendering.dynamicRendering = VK_TRUE;
+      feature_struct_ptr.push_back(&dynamic_rendering);
+    }
 
     VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT
         dynamic_rendering_unused_attachments = {};
@@ -1998,7 +2016,11 @@ GHOST_TSuccess GHOST_ContextVK::initializeDrawingContext()
 #endif
 
     optional_device_extensions.append(VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME);
-    required_device_extensions.append(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+    /* Optional, not required: a device without it renders through VkRenderPass instead (see the
+     * dynamic rendering feature guard in create_device()). MIUI reports Vulkan 1.1 and strips
+     * this extension from otherwise capable Mali drivers, so requiring it would exclude those
+     * devices outright instead of just costing them a slower render path. */
+    optional_device_extensions.append(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
     required_device_extensions.append(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
     required_device_extensions.append(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
     required_device_extensions.append(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME);

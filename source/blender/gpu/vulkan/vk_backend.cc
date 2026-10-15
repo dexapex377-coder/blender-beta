@@ -160,9 +160,10 @@ static Vector<StringRefNull> missing_capabilities_get(VkPhysicalDevice vk_physic
   if (!extensions.contains(VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
     missing_capabilities.append(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
   }
-  if (!extensions.contains(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)) {
-    missing_capabilities.append(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
-  }
+  /* VK_KHR_dynamic_rendering is deliberately not required: when it is missing the render graph
+   * falls back to VkRenderPass (VKRenderPassFallback). MIUI strips the extension from otherwise
+   * capable Mali drivers, so demanding it here would lock out a large part of the Android
+   * install base for no benefit. */
   if (!extensions.contains(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)) {
     missing_capabilities.append(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
   }

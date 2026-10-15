@@ -328,6 +328,25 @@ void VKCommandBufferWrapper::end_rendering()
   functions->vkCmdEndRenderingKHR(vk_command_buffer_);
 }
 
+void VKCommandBufferWrapper::begin_render_pass(VkRenderPass vk_render_pass,
+                                               VkFramebuffer vk_framebuffer,
+                                               const VkRect2D &render_area,
+                                               Span<VkClearValue> clear_values)
+{
+  VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+  begin_info.renderPass = vk_render_pass;
+  begin_info.framebuffer = vk_framebuffer;
+  begin_info.renderArea = render_area;
+  begin_info.clearValueCount = uint32_t(clear_values.size());
+  begin_info.pClearValues = clear_values.data();
+  functions->vkCmdBeginRenderPass(vk_command_buffer_, &begin_info, VK_NULL_HANDLE);
+}
+
+void VKCommandBufferWrapper::end_render_pass()
+{
+  functions->vkCmdEndRenderPass(vk_command_buffer_);
+}
+
 void VKCommandBufferWrapper::begin_query(VkQueryPool vk_query_pool,
                                          uint32_t query_index,
                                          VkQueryControlFlags vk_query_control_flags)

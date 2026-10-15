@@ -17,6 +17,7 @@
 #pragma once
 
 #include "vk_common.hh"
+#include "vk_backend.hh"
 #include "vk_device.hh"
 #include "vk_pipeline_pool.hh"
 #include "vk_vertex_attribute_object.hh"
@@ -87,6 +88,7 @@ struct VKGraphicsPipelineCreateInfoBuilder {
     build_color_blend_attachment_states(graphics_info.fragment_out);
     build_color_blend_state();
     build_dynamic_rendering(graphics_info.fragment_out);
+    render_pass_fallback_compat(graphics_info.fragment_out);
   }
 
   /**
@@ -156,7 +158,11 @@ struct VKGraphicsPipelineCreateInfoBuilder {
   {
     vk_graphics_pipeline_create_info = {};
     vk_graphics_pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    vk_graphics_pipeline_create_info.pNext = &vk_pipeline_rendering_create_info;
+    /* Left null when the render pass fallback is active; render_pass_fallback_compat() fills in
+     * renderPass instead, once the attachment formats have been built. */
+    if (!VKRenderPassFallback::is_active()) {
+      vk_graphics_pipeline_create_info.pNext = &vk_pipeline_rendering_create_info;
+    }
     vk_graphics_pipeline_create_info.stageCount = graphics_info.shaders.vk_geometry_module ==
                                                           VK_NULL_HANDLE ?
                                                       2 :
@@ -590,6 +596,34 @@ struct VKGraphicsPipelineCreateInfoBuilder {
         fragment_output_info.color_attachment_formats.data(),
         fragment_output_info.depth_attachment_format,
         fragment_output_info.stencil_attachment_format};
+  }
+
+  /**
+   * Tie the pipeline to a VkRenderPass when VK_KHR_dynamic_rendering is unavailable.
+   *
+   * The formats were just filled into vk_pipeline_rendering_create_info by
+   * build_dynamic_rendering(), which is why this cannot live in build_graphics_pipeline() where the
+   * rest of the create info is assembled. A "compat" render pass (generic load/store) is used so
+   * that one pipeline stays shareable across render scopes that clear or load differently --
+   * VkAttachmentDescription::loadOp is fixed at render pass creation.
+   *
+   * Dynamic rendering packs depth and stencil into one depthStencilFormat field; a render pass
+   * needs them separately, so they are taken from fragment_out rather than from the
+   * VkPipelineRenderingCreateInfo above.
+   */
+  void render_pass_fallback_compat(const VKGraphicsInfo::FragmentOut &fragment_output_info)
+  {
+    if (!VKRenderPassFallback::is_active()) {
+      return;
+    }
+    /* Local read is not emulated on this path, so the pNext chain must stay empty. */
+    vk_pipeline_rendering_create_info.pNext = nullptr;
+    vk_graphics_pipeline_create_info.renderPass =
+        VKBackend::get().device.render_pass_fallback.compat_render_pass_get(
+            Span<VkFormat>(fragment_output_info.color_attachment_formats.data(),
+                           fragment_output_info.color_attachment_formats.size()),
+            fragment_output_info.depth_attachment_format,
+            fragment_output_info.stencil_attachment_format);
   }
 
   /* Shaders lib only requires the view-mask to be set. When dynamic rendering local read is
