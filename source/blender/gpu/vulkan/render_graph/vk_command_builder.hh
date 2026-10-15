@@ -60,6 +60,9 @@ class VKCommandBuilder {
   /** Frames since the last report; the totals are averaged over this many. */
   uint32_t scope_report_frames = 0;
 
+  /** Android only. One line per scope, behind the android.perf switch. */
+  void scope_detail(const VKBeginRenderingData &begin_data) const;
+
   struct Barrier {
     /** Index range into `VKCommandBuilder::vk_buffer_memory_barriers_` */
     IndexRange buffer_memory_barriers;

@@ -51,6 +51,53 @@ void VKCommandBuilder::build_nodes(VKRenderGraph &render_graph,
       render_graph, node_handles, command_buffer.use_dynamic_rendering_local_read);
 }
 
+#ifdef __ANDROID__
+void VKCommandBuilder::scope_detail(const VKBeginRenderingData &begin_data) const
+{
+  static const bool log_enabled = []() {
+    char value[PROP_VALUE_MAX] = {};
+    return __system_property_get("debug.blender.perf", value) > 0 && atoi(value) != 0;
+  }();
+  if (!log_enabled) {
+    return;
+  }
+
+  /* Identity of the attachment set, so two scopes printing the same tag are candidates for being
+   * merged into one render pass. The views are the framebuffer's identity; the render area and the
+   * attachment count have to agree as well, since a merge also requires the same subpass shape. */
+  uint64_t view_tag = 1469598103934665603ull;
+  auto mix = [&view_tag](uint64_t v) {
+    view_tag = (view_tag ^ v) * 1099511628211ull;
+  };
+  for (uint32_t i = 0; i < begin_data.vk_rendering_info.colorAttachmentCount; i++) {
+    mix(reinterpret_cast<uintptr_t>(begin_data.color_attachments[i].imageView));
+  }
+  mix(reinterpret_cast<uintptr_t>(begin_data.depth_attachment.imageView));
+  mix(reinterpret_cast<uintptr_t>(begin_data.stencil_attachment.imageView));
+
+  const VkRect2D &area = begin_data.vk_rendering_info.renderArea;
+  uint32_t depth_op = 0;
+  if (begin_data.vk_rendering_info.pDepthAttachment != nullptr) {
+    depth_op = begin_data.depth_attachment.loadOp;
+  }
+
+  __android_log_print(ANDROID_LOG_WARN,
+                      "blender-scope",
+                      "  scope set=%016llx area=%dx%d+%d+%d color=%u depth=%u loadOp=%u "
+                      "color0=%016llx",
+                      (unsigned long long)view_tag,
+                      area.extent.width,
+                      area.extent.height,
+                      area.offset.x,
+                      area.offset.y,
+                      begin_data.vk_rendering_info.colorAttachmentCount,
+                      begin_data.vk_rendering_info.pDepthAttachment != nullptr ? 1 : 0,
+                      depth_op,
+                      (unsigned long long)reinterpret_cast<uintptr_t>(
+                          begin_data.color_attachments[0].imageView));
+}
+#endif
+
 void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                                        VKCommandBufferInterface &command_buffer,
                                        Span<NodeHandle> node_handles)
@@ -458,14 +505,18 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
          * and the flush cost tracks the pixels in the attachments rather than the number of draws,
          * so scopes and pixels are the two numbers that decide where optimisation pays. Reported
          * through the existing android.perf switch rather than a build, so the numbers can be
-         * compared with and without renderdiv on the same scene. */
+         * The per-scope lines answer what the totals cannot: whether repeated scopes share an
+         * attachment set. Those can be merged into one render pass and the tile flushes
+         * disappear; scopes targeting different images cannot be merged and only get cheaper by
+         * rendering less. Different fixes, so the distinction is worth the log lines. */
         {
           const VKBeginRenderingData &begin_data =
               render_graph.storage_.begin_rendering[node.storage_index];
           const VkRect2D &area = begin_data.vk_rendering_info.renderArea;
+          const uint32_t color_count = begin_data.vk_rendering_info.colorAttachmentCount;
           scope_pixels += uint64_t(area.extent.width) * uint64_t(area.extent.height) *
-                          (begin_data.vk_rendering_info.colorAttachmentCount + 1);
-          for (uint32_t i = 0; i < begin_data.vk_rendering_info.colorAttachmentCount; i++) {
+                          (color_count + 1);
+          for (uint32_t i = 0; i < color_count; i++) {
             if (begin_data.color_formats[i] == VK_FORMAT_UNDEFINED) {
               continue;
             }
@@ -481,6 +532,7 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
                 break;
             }
           }
+          scope_detail(begin_data);
         }
         rendering_scope = node_handle;
         rendering_active = true;
