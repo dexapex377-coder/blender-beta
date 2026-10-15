@@ -30,10 +30,13 @@
 namespace blender::gpu {
 
 class VKDiscardPool;
-class VKCommandBufferInterface;
 
 namespace render_graph {
 struct VKBeginRenderingData;
+/* VKCommandBufferInterface lives in this namespace (vk_command_buffer_wrapper.hh), not in
+ * blender::gpu; declaring it in the enclosing namespace would define an unrelated type that no
+ * call site can bind to. */
+class VKCommandBufferInterface;
 
 /**
  * Begin/end a render scope through a VkRenderPass instead of dynamic rendering. Defined in the .cc
