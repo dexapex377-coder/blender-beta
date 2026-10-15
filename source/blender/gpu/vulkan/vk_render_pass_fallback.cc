@@ -28,11 +28,10 @@ namespace blender::gpu {
 
 /* Zero-initialized before any device exists, so a render scope built during backend setup takes the
  * dynamic rendering path by default. */
-bool VKRenderPassFallback::is_active_ = false;
+std::atomic<bool> VKRenderPassFallback::is_active_{false};
 
 VkRenderPass VKRenderPassFallback::render_pass_from_key(const RenderPassKey &key)
 {
-  std::scoped_lock lock(mutex_);
   return render_passes_.lookup_or_add_cb(key, [&]() {
     VkAttachmentDescription attachments[9] = {};
     uint32_t attachment_count = 0;
@@ -127,9 +126,10 @@ VkRenderPass VKRenderPassFallback::render_pass_from_key(const RenderPassKey &key
   });
 }
 
-VkRenderPass VKRenderPassFallback::render_pass_get(const render_graph::VKBeginRenderingData &data)
+void VKRenderPassFallback::render_pass_key_from_data(const render_graph::VKBeginRenderingData &data,
+                                                     RenderPassKey &key) const
 {
-  RenderPassKey key = {};
+  key = {};
   key.color_count = data.vk_rendering_info.colorAttachmentCount;
   for (uint32_t i = 0; i < key.color_count; i++) {
     key.color_formats[i] = data.color_formats[i];
@@ -151,7 +151,89 @@ VkRenderPass VKRenderPassFallback::render_pass_get(const render_graph::VKBeginRe
   if (key.depth_layout == VK_IMAGE_LAYOUT_UNDEFINED) {
     key.depth_layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
   }
-  return render_pass_from_key(key);
+}
+
+VkRenderPass VKRenderPassFallback::render_pass_get(const render_graph::VKBeginRenderingData &data)
+{
+  RenderPassKey key;
+  render_pass_key_from_data(data, key);
+
+  std::scoped_lock lock(mutex_);
+  if (last_render_pass_ != VK_NULL_HANDLE && last_render_pass_key_ == key) {
+    return last_render_pass_;
+  }
+  VkRenderPass vk_render_pass = render_pass_from_key(key);
+  last_render_pass_key_ = key;
+  last_render_pass_ = vk_render_pass;
+  return vk_render_pass;
+}
+
+void VKRenderPassFallback::framebuffer_key_from_data(const render_graph::VKBeginRenderingData &data,
+                                                     FramebufferKey &key) const
+{
+  key = {};
+  const VkRect2D &area = data.vk_rendering_info.renderArea;
+  key.width = area.offset.x + area.extent.width;
+  key.height = area.offset.y + area.extent.height;
+  key.layers = std::max(1u, data.vk_rendering_info.layerCount);
+
+  /* Same attachment order as the render pass: real color views, then depth. */
+  for (uint32_t i = 0; i < data.vk_rendering_info.colorAttachmentCount; i++) {
+    if (data.color_formats[i] == VK_FORMAT_UNDEFINED) {
+      continue;
+    }
+    key.views[key.view_count++] = data.color_attachments[i].imageView;
+  }
+  if (data.depth_format != VK_FORMAT_UNDEFINED) {
+    key.views[key.view_count++] = data.depth_attachment.imageView;
+  }
+  else if (data.stencil_format != VK_FORMAT_UNDEFINED) {
+    key.views[key.view_count++] = data.stencil_attachment.imageView;
+  }
+}
+
+void VKRenderPassFallback::render_scope_get(const render_graph::VKBeginRenderingData &data,
+                                            VkRenderPass *r_vk_render_pass,
+                                            VkFramebuffer *r_vk_framebuffer)
+{
+  RenderPassKey rp_key;
+  render_pass_key_from_data(data, rp_key);
+  FramebufferKey fb_key;
+  framebuffer_key_from_data(data, fb_key);
+
+  /* One lock for both caches. Taking it here and only building on a miss is what makes the repeat
+   * case -- the common one -- a pair of memcmps and no hashing, no map probe and no second
+   * acquisition. render_pass_from_key() and the framebuffer lambda below both assume the lock is
+   * held; std::mutex is not reentrant, so neither may take it again. */
+  std::scoped_lock lock(mutex_);
+
+  if (last_render_pass_ == VK_NULL_HANDLE || !(last_render_pass_key_ == rp_key)) {
+    last_render_pass_ = render_pass_from_key(rp_key);
+    last_render_pass_key_ = rp_key;
+    /* The framebuffer key embeds the render pass handle, so a new pass invalidates the entry. */
+    last_framebuffer_ = VK_NULL_HANDLE;
+  }
+
+  fb_key.render_pass = last_render_pass_;
+  if (last_framebuffer_ == VK_NULL_HANDLE || !(last_framebuffer_key_ == fb_key)) {
+    last_framebuffer_key_ = fb_key;
+    last_framebuffer_ = framebuffers_.lookup_or_add_cb(fb_key, [&]() {
+      VkFramebufferCreateInfo create_info = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+      create_info.renderPass = fb_key.render_pass;
+      create_info.attachmentCount = fb_key.view_count;
+      create_info.pAttachments = fb_key.views;
+      create_info.width = std::max(1u, fb_key.width);
+      create_info.height = std::max(1u, fb_key.height);
+      create_info.layers = fb_key.layers;
+
+      VkFramebuffer vk_framebuffer = VK_NULL_HANDLE;
+      functions_->vkCreateFramebuffer(vk_device_, &create_info, nullptr, &vk_framebuffer);
+      return vk_framebuffer;
+    });
+  }
+
+  *r_vk_render_pass = last_render_pass_;
+  *r_vk_framebuffer = last_framebuffer_;
 }
 
 VkRenderPass VKRenderPassFallback::compat_render_pass_get(Span<VkFormat> color_formats,
@@ -256,6 +338,10 @@ void VKRenderPassFallback::deinit()
     functions_->vkDestroyRenderPass(vk_device_, vk_render_pass, nullptr);
   }
   render_passes_.clear();
+  /* The one-entry caches point into both maps; leaving them set would hand out handles that
+   * were just destroyed if anything asked again before the next init. */
+  last_render_pass_ = VK_NULL_HANDLE;
+  last_framebuffer_ = VK_NULL_HANDLE;
 }
 
 namespace render_graph {
@@ -264,8 +350,9 @@ void begin_rendering_fallback(VKCommandBufferInterface &command_buffer,
                               const VKBeginRenderingData &data)
 {
   VKRenderPassFallback &fallback = VKBackend::get().device.render_pass_fallback;
-  VkRenderPass vk_render_pass = fallback.render_pass_get(data);
-  VkFramebuffer vk_framebuffer = fallback.framebuffer_get(vk_render_pass, data);
+  VkRenderPass vk_render_pass = VK_NULL_HANDLE;
+  VkFramebuffer vk_framebuffer = VK_NULL_HANDLE;
+  fallback.render_scope_get(data, &vk_render_pass, &vk_framebuffer);
 #ifdef __ANDROID__
   {
     static const bool log_enabled = []() {

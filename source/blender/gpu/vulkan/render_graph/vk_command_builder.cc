@@ -15,6 +15,12 @@
 
 #include <sstream>
 
+#ifdef __ANDROID__
+#  include <android/log.h>
+#  include <cstdlib>
+#  include <sys/system_properties.h>
+#endif
+
 namespace blender::gpu::render_graph {
 
 static VkImageLayout to_default_image_layout(VkImageAspectFlags aspect, bool use_local_read)
@@ -50,6 +56,39 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                                        Span<NodeHandle> node_handles)
 {
   groups_build_commands(render_graph, command_buffer, node_handles);
+
+#ifdef __ANDROID__
+  /* Report every 60 frames. Averaged, because a single frame of a rotating viewport has a very
+   * different scope count from an idle one, and the interesting comparison is the steady state
+   * under the same interaction. */
+  if (++scope_report_frames >= 60) {
+    static const bool log_enabled = []() {
+      char value[PROP_VALUE_MAX] = {};
+      return __system_property_get("debug.blender.perf", value) > 0 && atoi(value) != 0;
+    }();
+    if (log_enabled) {
+      __android_log_print(ANDROID_LOG_WARN,
+                          "blender-scope",
+                          "scopes/frame=%u pixels/frame=%llu MPix/scope=%llu "
+                          "loadOp: clear=%u load=%u dontcare=%u  fallback=%d",
+                          uint32_t(scope_count / scope_report_frames),
+                          (unsigned long long)(scope_pixels / scope_report_frames),
+                          scope_count ?
+                              (unsigned long long)(scope_pixels / scope_count / 1000) :
+                              0ull,
+                          uint32_t(scope_load_clear / scope_report_frames),
+                          uint32_t(scope_load_keep / scope_report_frames),
+                          uint32_t(scope_load_none / scope_report_frames),
+                          int(VKRenderPassFallback::is_active()));
+    }
+    scope_pixels = 0;
+    scope_count = 0;
+    scope_load_clear = 0;
+    scope_load_keep = 0;
+    scope_load_none = 0;
+    scope_report_frames = 0;
+  }
+#endif
 }
 
 void VKCommandBuilder::groups_init(const VKRenderGraph &render_graph,
@@ -415,8 +454,37 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
       }
 
       if (node.type == VKNodeType::BEGIN_RENDERING) {
+        /* Per-frame accounting of render scopes. On a tile-based GPU each scope is a tile flush,
+         * and the flush cost tracks the pixels in the attachments rather than the number of draws,
+         * so scopes and pixels are the two numbers that decide where optimisation pays. Reported
+         * through the existing android.perf switch rather than a build, so the numbers can be
+         * compared with and without renderdiv on the same scene. */
+        {
+          const VKBeginRenderingData &begin_data =
+              render_graph.storage_.begin_rendering[node.storage_index];
+          const VkRect2D &area = begin_data.vk_rendering_info.renderArea;
+          scope_pixels += uint64_t(area.extent.width) * uint64_t(area.extent.height) *
+                          (begin_data.vk_rendering_info.colorAttachmentCount + 1);
+          for (uint32_t i = 0; i < begin_data.vk_rendering_info.colorAttachmentCount; i++) {
+            if (begin_data.color_formats[i] == VK_FORMAT_UNDEFINED) {
+              continue;
+            }
+            switch (begin_data.color_attachments[i].loadOp) {
+              case VK_ATTACHMENT_LOAD_OP_CLEAR:
+                scope_load_clear++;
+                break;
+              case VK_ATTACHMENT_LOAD_OP_LOAD:
+                scope_load_keep++;
+                break;
+              default:
+                scope_load_none++;
+                break;
+            }
+          }
+        }
         rendering_scope = node_handle;
         rendering_active = true;
+        scope_count++;
       }
 
       else if (node.type == VKNodeType::END_RENDERING) {

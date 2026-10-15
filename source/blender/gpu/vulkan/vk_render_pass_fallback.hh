@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstring>
 #include <mutex>
 
@@ -56,20 +57,25 @@ class VKRenderPassFallback {
  public:
   /**
    * True when the device lacks VK_KHR_dynamic_rendering and every render scope must go through
-   * VkRenderPass instead. Set once at device init, read on the submission thread, so it is a
-   * plain flag rather than a device query.
+   * VkRenderPass instead.
+   *
+   * Written once during device init on the main thread, then read on the submission thread (every
+   * render scope) and on the view-discard thread, so it is atomic rather than a plain bool -- a
+   * plain read of a value another thread wrote is a data race, and this one decides which Vulkan
+   * entry point a command buffer uses. Relaxed is enough and free: init publishes it before the
+   * submission thread is created, so there is nothing to synchronise against.
    */
   static bool is_active()
   {
-    return is_active_;
+    return is_active_.load(std::memory_order_relaxed);
   }
   static void set_active(bool active)
   {
-    is_active_ = active;
+    is_active_.store(active, std::memory_order_relaxed);
   }
 
  private:
-  static bool is_active_;
+  static std::atomic<bool> is_active_;
 
   /* POD keys: zero-initialized then filled, hashed/compared over their bytes so
    * padding stays deterministic. */
@@ -113,10 +119,32 @@ class VKRenderPassFallback {
 
   Map<RenderPassKey, VkRenderPass> render_passes_;
   Map<FramebufferKey, VkFramebuffer> framebuffers_;
+
+  /**
+   * One-entry cache in front of each map, checked before hashing.
+   *
+   * A frame is mostly many render scopes (the Redmi logged 3701 of them in a few seconds), and
+   * consecutive scopes very often share the same attachment set -- the viewport's own scope
+   * repeats every frame, and a deferred renderer draws many sub-passes against the same target.
+   * Comparing the POD key is a memcmp of ~100 bytes against a value already in cache, against an
+   * XXH3 over the same bytes plus a map probe. Both entries are only touched under `mutex_`, so
+   * this does not change the locking contract.
+   */
+  RenderPassKey last_render_pass_key_;
+  VkRenderPass last_render_pass_ = VK_NULL_HANDLE;
+  FramebufferKey last_framebuffer_key_;
+  VkFramebuffer last_framebuffer_ = VK_NULL_HANDLE;
+
   /** Guards the caches (accessed from the submission thread and view-discard). */
   std::mutex mutex_;
 
+  /** Caller must hold `mutex_`. */
   VkRenderPass render_pass_from_key(const RenderPassKey &key);
+  void render_pass_key_from_data(const render_graph::VKBeginRenderingData &data,
+                                 RenderPassKey &r_key) const;
+  /** Leaves `render_pass` at VK_NULL_HANDLE; the caller fills it once it has the pass. */
+  void framebuffer_key_from_data(const render_graph::VKBeginRenderingData &data,
+                                 FramebufferKey &r_key) const;
 
  public:
   void init(VkDevice vk_device, const VolkDeviceTable &functions)
@@ -128,6 +156,18 @@ class VKRenderPassFallback {
 
   /** Render pass matching the actual load/store ops, for vkCmdBeginRenderPass. */
   VkRenderPass render_pass_get(const render_graph::VKBeginRenderingData &data);
+
+  /**
+   * Render pass and framebuffer for a scope, in one call. The only entry point for render scopes;
+   * pipelines use compat_render_pass_get() instead.
+   *
+   * begin_rendering_fallback() needs both for every scope, and each lookup takes `mutex_`. Doing
+   * them together halves the lock traffic and lets the one-entry caches absorb the repeat case
+   * with a single lock acquisition per scope.
+   */
+  void render_scope_get(const render_graph::VKBeginRenderingData &data,
+                        VkRenderPass *r_vk_render_pass,
+                        VkFramebuffer *r_vk_framebuffer);
 
   /**
    * A render pass compatible (same formats/attachment layout) with the one above,

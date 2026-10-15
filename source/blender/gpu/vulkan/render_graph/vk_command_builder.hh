@@ -43,6 +43,23 @@ class VKCommandBuilder {
    */
   Vector<VkImageMemoryBarrier> vk_image_memory_barriers_;
 
+  /**
+   * Per-frame render-scope accounting, reported through the android.perf switch.
+   *
+   * On a tile-based GPU every scope ends the tile, and what that costs tracks the pixels covered
+   * by the attachments, not the number of draw calls. Counting both is what separates "many small
+   * scopes that could be merged" from "few large ones where only the load/store ops would help".
+   * Counted on both the dynamic rendering and the render pass fallback path, so the two can be
+   * compared directly.
+   */
+  uint64_t scope_pixels = 0;
+  uint32_t scope_count = 0;
+  uint32_t scope_load_clear = 0;
+  uint32_t scope_load_keep = 0;
+  uint32_t scope_load_none = 0;
+  /** Frames since the last report; the totals are averaged over this many. */
+  uint32_t scope_report_frames = 0;
+
   struct Barrier {
     /** Index range into `VKCommandBuilder::vk_buffer_memory_barriers_` */
     IndexRange buffer_memory_barriers;
