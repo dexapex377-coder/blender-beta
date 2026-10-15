@@ -567,8 +567,7 @@ void VKFrameBuffer::rendering_reset()
   is_rendering_ = false;
 }
 
-void VKFrameBuffer::rendering_ensure_dynamic_rendering(VKContext &context,
-                                                       const VKExtensions &extensions)
+void VKFrameBuffer::rendering_ensure_dynamic_rendering(VKContext &context)
 {
   const VKDevice &device = VKBackend::get().device;
   const bool supports_local_read = device.extensions_get().dynamic_rendering_local_read;
@@ -784,9 +783,8 @@ void VKFrameBuffer::rendering_ensure(VKContext &context)
     rendering_end(context);
   }
 
-  const VKExtensions &extensions = VKBackend::get().device.extensions_get();
   is_rendering_ = true;
-  rendering_ensure_dynamic_rendering(context, extensions);
+  rendering_ensure_dynamic_rendering(context);
   dirty_attachments_ = false;
   dirty_state_ = false;
   use_explicit_load_store_ = false;

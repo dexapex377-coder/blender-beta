@@ -264,10 +264,6 @@ class VKDevice : public NonCopyable {
   VKWorkarounds workarounds_;
   VKExtensions extensions_;
 
-  /** Only used when VK_KHR_dynamic_rendering is missing; owns the cached VkRenderPass and
-   * VkFramebuffer objects the render scope falls back to. */
-  VKRenderPassFallback render_pass_fallback;
-
   std::string glsl_vert_patch_;
   std::string glsl_geom_patch_;
   std::string glsl_frag_patch_;
@@ -283,6 +279,11 @@ class VKDevice : public NonCopyable {
   VKDiscardPool orphaned_data_render;
   VKPipelinePool pipelines;
   VKVertexInputDescriptionPool vertex_input_descriptions;
+
+  /** Only used when VK_KHR_dynamic_rendering is missing; owns the cached VkRenderPass and
+   * VkFramebuffer objects the render scope falls back to. Public because the image view
+   * destructor and graphics pipeline builder both have to reach it. */
+  VKRenderPassFallback render_pass_fallback;
 
   /** Buffer to bind to unbound resource locations. */
   VKBuffer dummy_buffer;
