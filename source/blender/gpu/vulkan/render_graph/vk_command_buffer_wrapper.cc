@@ -324,12 +324,24 @@ void VKCommandBufferWrapper::set_vertex_input(
 
 void VKCommandBufferWrapper::begin_rendering(const VkRenderingInfo *p_rendering_info)
 {
+  if (VKRenderPassFallback::is_active()) {
+    /* Reached only if a call site bypasses VKBeginRenderingNode, which is where the fallback is
+     * normally entered. The render pass for the scope has not been built at that point, so there
+     * is nothing correct to do here; skipping turns what used to be a SIGSEGV at 0x0 into a
+     * missing render scope that the validation layer reports. */
+    return;
+  }
   BLI_assert(functions->vkCmdBeginRenderingKHR);
   functions->vkCmdBeginRenderingKHR(vk_command_buffer_, p_rendering_info);
 }
 
 void VKCommandBufferWrapper::end_rendering()
 {
+  if (VKRenderPassFallback::is_active()) {
+    /* Same reasoning as begin_rendering(). Not the end of a fallback scope -- that goes through
+     * end_rendering_fallback() -- so ending the render pass here would close the wrong one. */
+    return;
+  }
   BLI_assert(functions->vkCmdEndRenderingKHR);
   functions->vkCmdEndRenderingKHR(vk_command_buffer_);
 }

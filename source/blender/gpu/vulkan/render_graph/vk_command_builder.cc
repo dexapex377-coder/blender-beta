@@ -10,6 +10,7 @@
 #include "BLI_index_range.hh"
 #include "vk_backend.hh"
 #include "vk_render_graph.hh"
+#include "vk_render_pass_fallback.hh"
 #include "vk_to_string.hh"
 
 #include <sstream>
@@ -459,7 +460,17 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
       /* Suspend rendering as the next node group will contain data transfer/dispatch commands.
        */
       rendering_active = false;
-      command_buffer.end_rendering();
+      /* Not the END_RENDERING node: this closes a scope the builder suspended between node
+       * groups, so it bypasses the node that would otherwise route through the fallback. Calling
+       * end_rendering() here reached vkCmdEndRenderingKHR unguarded, which is null without
+       * VK_KHR_dynamic_rendering -- a SIGSEGV at 0x0 on the first frame. Mirrors what
+       * VKBeginRenderingNode/VKEndRenderingNode do. */
+      if (VKRenderPassFallback::is_active()) {
+        end_rendering_fallback(command_buffer);
+      }
+      else {
+        command_buffer.end_rendering();
+      }
     }
 
     /* Record group post barriers. */
