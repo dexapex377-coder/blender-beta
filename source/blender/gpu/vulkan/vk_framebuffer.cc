@@ -572,14 +572,18 @@ void VKFrameBuffer::rendering_ensure_dynamic_rendering(VKContext &context)
   const VKDevice &device = VKBackend::get().device;
   const bool supports_local_read = device.extensions_get().dynamic_rendering_local_read;
 
-  /* An attachment with no image view has to be reported as VK_FORMAT_UNDEFINED when the render
-   * pass fallback is in use: the fallback maps UNDEFINED to VK_ATTACHMENT_UNUSED and omits the
-   * view from the VkFramebuffer, whereas a real format with a null view would build a framebuffer
-   * with a null attachment. Dynamic rendering gets the same handling from
-   * VK_EXT_dynamic_rendering_unused_attachments. */
+  /* An attachment with no image view must be reported as VK_FORMAT_UNDEFINED, because that is what
+   * gets it omitted everywhere: the render pass fallback turns UNDEFINED into VK_ATTACHMENT_UNUSED
+   * and leaves the view out of the VkFramebuffer, whereas a real format with a null view builds a
+   * framebuffer with a null attachment, which the driver dereferences (SIGSEGV at 0x8 in
+   * vkCreateFramebuffer on Mali).
+   *
+   * VK_EXT_dynamic_rendering_unused_attachments is the opposite: it exists so dynamic rendering
+   * can keep a real format and skip the view. That is exactly what a render pass cannot express, so
+   * on the fallback path the extension must not buy that behaviour -- hence not ORed in here. */
   const bool allow_unused_attachments =
-      device.extensions_get().dynamic_rendering_unused_attachments ||
-      VKRenderPassFallback::is_active();
+      device.extensions_get().dynamic_rendering_unused_attachments &&
+      !VKRenderPassFallback::is_active();
 
   depth_attachment_format_ = VK_FORMAT_UNDEFINED;
   stencil_attachment_format_ = VK_FORMAT_UNDEFINED;
