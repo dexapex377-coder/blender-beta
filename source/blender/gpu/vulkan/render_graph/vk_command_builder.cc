@@ -105,18 +105,16 @@ bool VKCommandBuilder::group_touches_open_scope(const VKRenderGraph &render_grap
   return false;
 }
 
-bool VKCommandBuilder::hold_pass_fusion_disabled()
+bool VKCommandBuilder::hold_pass_fusion_enabled()
 {
 #ifdef __ANDROID__
-  /* Escape hatch. Holding a render pass open across a group boundary depends on the driver
-   * tolerating whatever the group records; the MediaTek one kills the process on the first frame
-   * if it does not. Keeping this switchable means a driver that turns out to disagree can be
-   * stepped back from logcat without a 170 MB rebuild. */
-  static const bool disabled = []() {
+  /* Opt-in, see the declaration: this crashes on the first frame and nothing tried has narrowed
+   * it down, so it stays off unless someone deliberately asks for it. */
+  static const bool enabled = []() {
     char value[PROP_VALUE_MAX] = {};
-    return __system_property_get("debug.blender.nopassfusion", value) > 0 && atoi(value) != 0;
+    return __system_property_get("debug.blender.passfusion", value) > 0 && atoi(value) != 0;
   }();
-  return disabled;
+  return enabled;
 #else
   return false;
 #endif
@@ -649,7 +647,7 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
       node.build_commands(command_buffer, render_graph.storage_, active_pipelines);
     }
 
-    if (rendering_active && !hold_pass_fusion_disabled() &&
+    if (rendering_active && hold_pass_fusion_enabled() &&
         !group_touches_open_scope(render_graph, rendering_scope, group_nodes, node_handles, group_index))
     {
       /* The next group does not read or write any attachment of the open scope, so nothing forces
