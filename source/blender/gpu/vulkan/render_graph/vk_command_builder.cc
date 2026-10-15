@@ -66,6 +66,8 @@ bool VKCommandBuilder::group_touches_open_scope(const VKRenderGraph &render_grap
       render_graph.linked_images(render_graph.nodes_[rendering_scope]);
   if (scope_links.is_empty()) {
     /* Nothing recorded for the attachments means no basis for holding the pass open. */
+    log_fusion("reject", group_index, next_group, node_handles, scope_links,
+               0, render_graph, "scope has no image links");
     return true;
   }
 
@@ -79,6 +81,8 @@ bool VKCommandBuilder::group_touches_open_scope(const VKRenderGraph &render_grap
     {
       for (const VKRenderGraphImage &scope_link : scope_links) {
         if (node_link.resource.handle == scope_link.resource.handle) {
+          log_fusion("reject-touch", group_index, next_group, node_handles, scope_links, 0,
+                     render_graph, "group links an attachment");
           return true;
         }
       }
@@ -100,10 +104,54 @@ bool VKCommandBuilder::group_touches_open_scope(const VKRenderGraph &render_grap
   const Span<VkImageMemoryBarrier> post_image_barriers =
       vk_image_memory_barriers_.as_span().slice(group_post_barriers_[group_index]);
   if (!post_image_barriers.is_empty()) {
+    log_fusion("reject-barrier", group_index, next_group, node_handles, scope_links,
+               int(post_image_barriers.size()), render_graph,
+               "ending group carries image barriers");
     return true;
   }
+  log_fusion("FUSE", group_index, next_group, node_handles, scope_links,
+               0, render_graph, "holding the pass open");
   return false;
 }
+
+#ifdef __ANDROID__
+/**
+ * Trace the fusion decision. This exists because the crash has no usable backtrace -- it lands in
+ * vulkan.mtk.so with only driver frames -- so the only way to find out what the command stream
+ * contained is to say what was about to be recorded. Prints the decision, the node types in the
+ * group about to run, the attachment handles, and how many image links were compared.
+ */
+void VKCommandBuilder::log_fusion(const char *decision,
+                                  int64_t group_index,
+                                  IndexRange next_group,
+                                  Span<NodeHandle> node_handles,
+                                  Span<const VKRenderGraphImage> scope_links,
+                                  int post_image_barriers,
+                                  const VKRenderGraph &render_graph,
+                                  const char *why) const
+{
+  static const bool log_enabled = []() {
+    char value[PROP_VALUE_MAX] = {};
+    return __system_property_get("debug.blender.perf", value) > 0 && atoi(value) != 0;
+  }();
+  if (!log_enabled) {
+    return;
+  }
+
+  std::stringstream ss;
+  ss << "fusion " << decision << " why=" << why << " group=" << group_index
+     << " nodes=" << next_group.size() << " types=";
+  for (const int64_t i : next_group) {
+    ss << int(render_graph.nodes_[node_handles[i]].type) << ",";
+  }
+  ss << " attach=" << scope_links.size();
+  for (const VKRenderGraphImage &link : scope_links) {
+    ss << "/" << uint64_t(link.resource.handle) << ":" << int(link.vk_access_flags);
+  }
+  ss << " postBarriers=" << post_image_barriers;
+  __android_log_print(ANDROID_LOG_WARN, "blender-fusion", "%s", ss.str().c_str());
+}
+#endif
 
 bool VKCommandBuilder::hold_pass_fusion_enabled()
 {

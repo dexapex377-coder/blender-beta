@@ -12,6 +12,7 @@
 
 #include "vk_common.hh"
 #include "vk_render_graph_node.hh"
+#include "vk_render_graph_links.hh"
 #include "vk_scheduler.hh"
 
 namespace blender::gpu::render_graph {
@@ -88,6 +89,16 @@ class VKCommandBuilder {
    * start by working out what is actually touching the attachment.
    */
   static bool hold_pass_fusion_enabled();
+
+  /** Android only. Traces the pass fusion decision; see the .cc for why. */
+  void log_fusion(const char *decision,
+                  int64_t group_index,
+                  IndexRange next_group,
+                  Span<NodeHandle> node_handles,
+                  Span<const VKRenderGraphImage> scope_links,
+                  int post_image_barriers,
+                  const VKRenderGraph &render_graph,
+                  const char *why) const;
 
   /**
    * Whether any node in `next_group` reads or writes an image that is an attachment of the open
