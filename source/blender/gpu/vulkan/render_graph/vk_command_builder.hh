@@ -136,6 +136,14 @@ class VKCommandBuilder {
                     bool directly_adjacent,
                     bool matches_previous) const;
 
+  /** Android debug only. One extra line per scope: pass name (debug group path), draw count,
+   * node count inside, and the ordered node run between the previous scope and this begin.
+   * Behind `debug.blender.scopenames`, off by default. */
+  void scope_names_detail(VKRenderGraph &render_graph,
+                          Span<NodeHandle> node_handles,
+                          int64_t flat_index,
+                          NodeHandle node_handle) const;
+
   /** Opens a timestamp pair for a scope that is about to record its begin. */
   void timestamp_scope_begin(VKCommandBufferInterface &command_buffer,
                              const VKBeginRenderingData &begin_data);

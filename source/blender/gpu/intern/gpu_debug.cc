@@ -10,6 +10,7 @@
 
 #include "BKE_global.hh"
 
+#include "BLI_perf_probe.hh"
 #include "BLI_string.hh"
 
 #include "gpu_context_private.hh"
@@ -22,7 +23,7 @@ using namespace blender::gpu;
 
 void GPU_debug_group_begin(const char *name)
 {
-  if (!(G.debug & G_DEBUG_GPU) && !G.profile_gpu) {
+  if (!(G.debug & G_DEBUG_GPU) && !G.profile_gpu && !perf::scope_names_enabled()) {
     return;
   }
   Context *ctx = Context::get();
@@ -33,7 +34,7 @@ void GPU_debug_group_begin(const char *name)
 
 void GPU_debug_group_end()
 {
-  if (!(G.debug & G_DEBUG_GPU) && !G.profile_gpu) {
+  if (!(G.debug & G_DEBUG_GPU) && !G.profile_gpu && !perf::scope_names_enabled()) {
     return;
   }
   Context *ctx = Context::get();

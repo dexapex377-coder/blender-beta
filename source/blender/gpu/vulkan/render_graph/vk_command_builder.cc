@@ -8,6 +8,7 @@
 
 #include "vk_command_builder.hh"
 #include "BLI_index_range.hh"
+#include "BLI_perf_probe.hh"
 #include "vk_backend.hh"
 #include "vk_command_buffer_wrapper.hh"
 #include "vk_render_graph.hh"
@@ -109,6 +110,137 @@ void VKCommandBuilder::scope_detail(const VKBeginRenderingData &begin_data,
                       prev_node_type,
                       directly_adjacent ? 1 : 0,
                       matches_previous ? 1 : 0);
+}
+#endif
+
+#ifdef __ANDROID__
+namespace {
+
+const char *scope_node_short_name(const VKNodeType type)
+{
+  switch (type) {
+    case VKNodeType::UNUSED:
+      return "??";
+    case VKNodeType::BEGIN_QUERY:
+      return "BQ";
+    case VKNodeType::BEGIN_RENDERING:
+      return "BR";
+    case VKNodeType::BLIT_IMAGE:
+      return "BL";
+    case VKNodeType::BUILD_ACCELERATION_STRUCTURE:
+      return "AS";
+    case VKNodeType::CLEAR_ATTACHMENTS:
+      return "CLa";
+    case VKNodeType::CLEAR_COLOR_IMAGE:
+      return "CLc";
+    case VKNodeType::CLEAR_DEPTH_STENCIL_IMAGE:
+      return "CLd";
+    case VKNodeType::COPY_BUFFER:
+      return "CPb";
+    case VKNodeType::COPY_IMAGE:
+      return "CPi";
+    case VKNodeType::COPY_IMAGE_TO_BUFFER:
+      return "Ci2b";
+    case VKNodeType::COPY_BUFFER_TO_IMAGE:
+      return "Cb2i";
+    case VKNodeType::DISPATCH:
+      return "DI";
+    case VKNodeType::DISPATCH_INDIRECT:
+      return "DIi";
+    case VKNodeType::DRAW:
+      return "DR";
+    case VKNodeType::DRAW_INDEXED:
+      return "DRx";
+    case VKNodeType::DRAW_INDEXED_INDIRECT:
+      return "DRxi";
+    case VKNodeType::DRAW_INDIRECT:
+      return "DRi";
+    case VKNodeType::END_QUERY:
+      return "EQ";
+    case VKNodeType::END_RENDERING:
+      return "ER";
+    case VKNodeType::FILL_BUFFER:
+      return "FB";
+    case VKNodeType::RESET_QUERY_POOL:
+      return "RQ";
+    case VKNodeType::SYNCHRONIZATION:
+      return "SY";
+    case VKNodeType::UPDATE_BUFFER:
+      return "UP";
+    case VKNodeType::UPDATE_MIPMAPS:
+      return "UM";
+  }
+  return "??";
+}
+
+}  // namespace
+
+void VKCommandBuilder::scope_names_detail(VKRenderGraph &render_graph,
+                                          const Span<NodeHandle> node_handles,
+                                          const int64_t flat_index,
+                                          const NodeHandle node_handle) const
+{
+  if (!blender::perf::scope_names_enabled()) {
+    return;
+  }
+
+  const std::string name = render_graph.full_debug_group(node_handle);
+
+  /* The ordered node run between the previous scope's close and this begin. That run is what a
+   * join would have to move across, so its contents decide what is fusible. Collected walking
+   * backwards and printed in chronological order. */
+  VKNodeType run[64];
+  int run_len = 0;
+  bool closed_by_scope = false;
+  for (int64_t i = flat_index - 1; i >= 0 && run_len < 64; i--) {
+    const VKNodeType type = render_graph.nodes_[node_handles[i]].type;
+    if (type == VKNodeType::END_RENDERING) {
+      closed_by_scope = true;
+      break;
+    }
+    run[run_len++] = type;
+  }
+  std::string between;
+  for (int j = run_len - 1; j >= 0; j--) {
+    if (!between.empty()) {
+      between += ',';
+    }
+    between += scope_node_short_name(run[j]);
+    if (between.size() > 240) {
+      between += ",..";
+      break;
+    }
+  }
+  if (!closed_by_scope && !between.empty()) {
+    between = "|start," + between;
+  }
+  if (between.empty()) {
+    between = "(none)";
+  }
+
+  /* Draw calls inside this scope: an empty scope is a free removal candidate. */
+  int draws = 0;
+  int inside_nodes = 0;
+  for (int64_t i = flat_index + 1; i < int64_t(node_handles.size()); i++) {
+    const VKNodeType type = render_graph.nodes_[node_handles[i]].type;
+    if (type == VKNodeType::END_RENDERING) {
+      break;
+    }
+    inside_nodes++;
+    if (type == VKNodeType::DRAW || type == VKNodeType::DRAW_INDEXED ||
+        type == VKNodeType::DRAW_INDIRECT || type == VKNodeType::DRAW_INDEXED_INDIRECT)
+    {
+      draws++;
+    }
+  }
+
+  __android_log_print(ANDROID_LOG_WARN,
+                      "blender-scope",
+                      "    scope2 name=\"%s\" draws=%d nodes=%d between=%s",
+                      name.c_str(),
+                      draws,
+                      inside_nodes,
+                      between.c_str());
 }
 #endif
 
@@ -999,6 +1131,7 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
                                                                                    node_handle,
                                                                                    flat_index);
           scope_detail(begin_data, prev_node_type, directly_adjacent, matches_previous);
+          scope_names_detail(render_graph, node_handles, flat_index, node_handle);
           /* Measurement only. A scope targeting the same attachments as the previous one is a
            * merge candidate, and there are two kinds of those: adjacent (the END/BEGIN pair is
            * dropped and both draw runs become one scope) and separated by other work (the

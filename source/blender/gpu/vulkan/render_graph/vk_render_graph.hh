@@ -45,6 +45,7 @@
 
 #include "BLI_color_types.hh"
 #include "BLI_map.hh"
+#include "BLI_perf_probe.hh"
 #include "BLI_utility_mixins.hh"
 #include "BLI_vector.hh"
 #include "BLI_vector_set.hh"
@@ -174,7 +175,7 @@ class VKRenderGraph : public NonCopyable {
     VKRenderGraphNode &node = nodes_[node_handle];
     BLI_assert(node.type == NodeInfo::node_type);
 
-    if (G.debug & G_DEBUG_GPU) {
+    if ((G.debug & G_DEBUG_GPU) || blender::perf::scope_names_enabled()) {
       if (!debug_.group_used) {
         debug_.group_used = true;
         debug_.used_groups.append(debug_.group_stack);
@@ -210,7 +211,7 @@ class VKRenderGraph : public NonCopyable {
     node.set_node_data<NodeInfo>(storage_, create_info);
     node.build_links<NodeInfo>(resources_, links_, create_info);
 
-    if (G.debug & G_DEBUG_GPU) {
+    if ((G.debug & G_DEBUG_GPU) || blender::perf::scope_names_enabled()) {
       if (!debug_.group_used) {
         debug_.group_used = true;
         debug_.used_groups.append(debug_.group_stack);

@@ -95,7 +95,7 @@ void VKRenderGraph::debug_print(NodeHandle node_handle) const
 
 std::string VKRenderGraph::full_debug_group(NodeHandle node_handle) const
 {
-  if ((G.debug & G_DEBUG_GPU) == 0) {
+  if ((G.debug & G_DEBUG_GPU) == 0 && !blender::perf::scope_names_enabled()) {
     return std::string();
   }
 

@@ -52,6 +52,23 @@ inline bool enabled()
   return false;
 }
 
+/** Pass-name diagnostics for the Vulkan render graph. The graph tracks debug group names per
+ * node only for `--debug-gpu`; this switch lifts that gate on Android so the command builder can
+ * print which pass a scope is, without recording debug labels into the command stream. Set
+ * `debug.blender.scopenames 1` before launch. Off by default, no cost when off. */
+inline bool scope_names_enabled()
+{
+#ifdef __ANDROID__
+  static const bool on = []() {
+    char value[PROP_VALUE_MAX] = {};
+    return __system_property_get("debug.blender.scopenames", value) > 0 && atoi(value) != 0;
+  }();
+  return on;
+#else
+  return false;
+#endif
+}
+
 using TimePoint = std::chrono::steady_clock::time_point;
 
 /** Rolling-average accumulator; one static instance per `PERF_ZONE` call site. */
