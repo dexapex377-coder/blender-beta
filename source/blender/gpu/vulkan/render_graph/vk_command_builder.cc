@@ -16,6 +16,7 @@
 #include "vk_to_string.hh"
 
 #include <sstream>
+#include <cstdio>
 
 #ifdef __ANDROID__
 #  include <android/log.h>
@@ -173,6 +174,41 @@ const char *scope_node_short_name(const VKNodeType type)
   return "??";
 }
 
+/** Identity of the buffer nodes inside a scope run: buffer handles and byte counts, so the log
+ * separates pass-local command uploads from copies of scene data. */
+void scope_node_identity(const VKRenderGraphNode &node, std::string &r_out)
+{
+  char buffer[96];
+  switch (node.type) {
+    case VKNodeType::COPY_BUFFER:
+      snprintf(buffer,
+               sizeof(buffer),
+               "(%llx>%llx:%llu)",
+               (unsigned long long)(uintptr_t)node.copy_buffer.src_buffer.vk_handle,
+               (unsigned long long)(uintptr_t)node.copy_buffer.dst_buffer.vk_handle,
+               (unsigned long long)node.copy_buffer.region.size);
+      break;
+    case VKNodeType::UPDATE_BUFFER:
+      snprintf(buffer,
+               sizeof(buffer),
+               "(%llx@%llu:%llu)",
+               (unsigned long long)(uintptr_t)node.update_buffer.dst_buffer.vk_handle,
+               (unsigned long long)node.update_buffer.dst_offset,
+               (unsigned long long)node.update_buffer.data_size);
+      break;
+    case VKNodeType::FILL_BUFFER:
+      snprintf(buffer,
+               sizeof(buffer),
+               "(%llx:%llu)",
+               (unsigned long long)(uintptr_t)node.fill_buffer.buffer.vk_handle,
+               (unsigned long long)node.fill_buffer.size);
+      break;
+    default:
+      return;
+  }
+  r_out += buffer;
+}
+
 }  // namespace
 
 void VKCommandBuilder::scope_names_detail(VKRenderGraph &render_graph,
@@ -188,25 +224,27 @@ void VKCommandBuilder::scope_names_detail(VKRenderGraph &render_graph,
 
   /* The ordered node run between the previous scope's close and this begin. That run is what a
    * join would have to move across, so its contents decide what is fusible. Collected walking
-   * backwards and printed in chronological order. */
-  VKNodeType run[64];
+   * backwards and printed in chronological order, with buffer identities for the upload nodes. */
+  NodeHandle run[64];
   int run_len = 0;
   bool closed_by_scope = false;
   for (int64_t i = flat_index - 1; i >= 0 && run_len < 64; i--) {
-    const VKNodeType type = render_graph.nodes_[node_handles[i]].type;
-    if (type == VKNodeType::END_RENDERING) {
+    const NodeHandle handle = node_handles[i];
+    if (render_graph.nodes_[handle].type == VKNodeType::END_RENDERING) {
       closed_by_scope = true;
       break;
     }
-    run[run_len++] = type;
+    run[run_len++] = handle;
   }
   std::string between;
   for (int j = run_len - 1; j >= 0; j--) {
+    const VKRenderGraphNode &node = render_graph.nodes_[run[j]];
     if (!between.empty()) {
       between += ',';
     }
-    between += scope_node_short_name(run[j]);
-    if (between.size() > 240) {
+    between += scope_node_short_name(node.type);
+    scope_node_identity(node, between);
+    if (between.size() > 300) {
       between += ",..";
       break;
     }
@@ -218,17 +256,25 @@ void VKCommandBuilder::scope_names_detail(VKRenderGraph &render_graph,
     between = "(none)";
   }
 
-  /* Draw calls inside this scope: an empty scope is a free removal candidate. */
+  /* Nodes inside this scope: draws are the visible work, anything else decides whether the
+   * scope could be dropped or joined. */
   int draws = 0;
   int inside_nodes = 0;
+  std::string inside;
   for (int64_t i = flat_index + 1; i < int64_t(node_handles.size()); i++) {
-    const VKNodeType type = render_graph.nodes_[node_handles[i]].type;
-    if (type == VKNodeType::END_RENDERING) {
+    const VKRenderGraphNode &node = render_graph.nodes_[node_handles[i]];
+    if (node.type == VKNodeType::END_RENDERING) {
       break;
     }
     inside_nodes++;
-    if (type == VKNodeType::DRAW || type == VKNodeType::DRAW_INDEXED ||
-        type == VKNodeType::DRAW_INDIRECT || type == VKNodeType::DRAW_INDEXED_INDIRECT)
+    if (inside.size() < 60) {
+      if (!inside.empty()) {
+        inside += ',';
+      }
+      inside += scope_node_short_name(node.type);
+    }
+    if (node.type == VKNodeType::DRAW || node.type == VKNodeType::DRAW_INDEXED ||
+        node.type == VKNodeType::DRAW_INDIRECT || node.type == VKNodeType::DRAW_INDEXED_INDIRECT)
     {
       draws++;
     }
@@ -236,10 +282,11 @@ void VKCommandBuilder::scope_names_detail(VKRenderGraph &render_graph,
 
   __android_log_print(ANDROID_LOG_WARN,
                       "blender-scope",
-                      "    scope2 name=\"%s\" draws=%d nodes=%d between=%s",
+                      "    scope2 name=\"%s\" draws=%d nodes=%d inside=%s between=%s",
                       name.c_str(),
                       draws,
                       inside_nodes,
+                      inside.empty() ? "(none)" : inside.c_str(),
                       between.c_str());
 }
 #endif
@@ -473,7 +520,8 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                           "blender-scope",
                           "scopes/frame=%u pixels/frame=%llu MPix/scope=%llu "
                           "loadOp: clear=%u load=%u dontcare=%u  fallback=%d  "
-                          "adjacent=%u mergeable=%u loadok=%u repeat=%u repeatsep=%u merged=%u",
+                          "adjacent=%u mergeable=%u loadok=%u repeat=%u repeatsep=%u merged=%u "
+                          "elided=%u",
                           uint32_t(scope_count / scope_report_frames),
                           (unsigned long long)(scope_pixels / scope_report_frames),
                           scope_count ?
@@ -488,7 +536,8 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                           uint32_t(scope_mergeable_loadok / scope_report_frames),
                           uint32_t(scope_repeat / scope_report_frames),
                           uint32_t(scope_repeat_foreign / scope_report_frames),
-                          uint32_t(scope_merged / scope_report_frames));
+                          uint32_t(scope_merged / scope_report_frames),
+                          uint32_t(scope_elided / scope_report_frames));
       __android_log_print(ANDROID_LOG_WARN,
                           "blender-scope",
                           "cmds/frame: draw=%llu dispatch=%llu barrier=%llu(%llu) pipe=%llu "
@@ -524,6 +573,7 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
     scope_repeat = 0;
     scope_repeat_foreign = 0;
     scope_merged = 0;
+    scope_elided = 0;
     scope_report_frames = 0;
   }
 #endif
@@ -559,6 +609,7 @@ void VKCommandBuilder::groups_extract_barriers(VKRenderGraph &render_graph,
   scope_merge_skip_.clear();
   scope_merge_dropped_.clear();
   scope_merges_.clear();
+  collect_scope_elisions(render_graph, node_handles);
 
   /* The pass below runs with the marked scope joins applied, so the groups it walks and the
    * barriers it produces are the ones the recording sees. A join is only kept when it leaves
@@ -609,8 +660,9 @@ void VKCommandBuilder::extract_barriers_pass(VKRenderGraph &render_graph,
     for (const int64_t group_node_index : node_group) {
       NodeHandle node_handle = node_handles[group_node_index];
       VKRenderGraphNode &node = render_graph.nodes_[node_handle];
-      if (scope_merge_skipped(node_handle)) {
-        /* Joined scope: neither this node's barriers nor its scope bookkeeping apply. */
+      if (scope_merge_skipped(node_handle) || scope_elide_.contains(node_handle)) {
+        /* Joined or elided scope: neither this node's barriers nor its scope bookkeeping
+         * apply. */
         continue;
       }
       Barrier barrier = {};
@@ -920,6 +972,11 @@ bool VKCommandBuilder::try_scope_merge(VKRenderGraph &render_graph,
   if (render_graph.nodes_[begin_rendering].type != VKNodeType::BEGIN_RENDERING) {
     return false;
   }
+  if (scope_elide_.contains(begin_rendering)) {
+    /* An elided scope records no begin at all, so a join would keep the previous scope open
+     * across its body instead. */
+    return false;
+  }
   if (scope_merge_dropped_.contains(end_rendering)) {
     return false;
   }
@@ -960,6 +1017,111 @@ bool VKCommandBuilder::drop_unsafe_scope_merges()
     dropped = true;
   }
   return dropped;
+}
+
+void VKCommandBuilder::collect_scope_elisions(const VKRenderGraph &render_graph,
+                                              Span<NodeHandle> node_handles)
+{
+  scope_elide_.clear();
+
+#ifdef __ANDROID__
+  /* Dropping the pair changes the recorded stream; the joins' switch turns it off with them
+   * (`setprop debug.blender.scopemerge 0`), so both can be compared without a rebuild. */
+  static const bool scope_elision_enabled = []() {
+    char value[PROP_VALUE_MAX] = {};
+    const int len = __system_property_get("debug.blender.scopemerge", value);
+    return !(len > 0 && atoi(value) == 0);
+  }();
+  if (!scope_elision_enabled) {
+    return;
+  }
+#endif
+
+  for (int64_t i = 0; i < int64_t(node_handles.size()); i++) {
+    const NodeHandle begin_handle = node_handles[i];
+    const VKRenderGraphNode &begin_node = render_graph.nodes_[begin_handle];
+    if (begin_node.type != VKNodeType::BEGIN_RENDERING) {
+      continue;
+    }
+
+    const VKBeginRenderingData &begin_data =
+        render_graph.storage_.begin_rendering[begin_node.storage_index];
+
+    /* A clear load operation does real work at the begin, so a scope that clears is never
+     * dropped. Load and don't-care carry no writes of their own. */
+    bool clears = false;
+    for (uint32_t attachment = 0; attachment < begin_data.vk_rendering_info.colorAttachmentCount;
+         attachment++)
+    {
+      if (begin_data.color_attachments[attachment].loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) {
+        clears = true;
+        break;
+      }
+    }
+    if (begin_data.vk_rendering_info.pDepthAttachment != nullptr &&
+        begin_data.depth_attachment.loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR)
+    {
+      clears = true;
+    }
+    if (begin_data.vk_rendering_info.pStencilAttachment != nullptr &&
+        begin_data.stencil_attachment.loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR)
+    {
+      clears = true;
+    }
+    if (clears) {
+      continue;
+    }
+
+    /* Walk the body: only synchronization nodes allowed, and the scope has to close in this
+     * list (a begin that never closes would leave the state machine mid-scope). */
+    bool closes = false;
+    bool has_body_work = false;
+    NodeHandle end_handle = 0;
+    int body_nodes = 0;
+    VKNodeType body_types[16];
+    int body_type_count = 0;
+    for (int64_t j = i + 1; j < int64_t(node_handles.size()); j++) {
+      const NodeHandle inner_handle = node_handles[j];
+      const VKRenderGraphNode &inner_node = render_graph.nodes_[inner_handle];
+      if (inner_node.type == VKNodeType::END_RENDERING) {
+        closes = true;
+        end_handle = inner_handle;
+        break;
+      }
+      if (inner_node.type != VKNodeType::SYNCHRONIZATION) {
+        has_body_work = true;
+      }
+      body_nodes++;
+      if (body_type_count < 16) {
+        body_types[body_type_count++] = inner_node.type;
+      }
+    }
+    if (!closes || has_body_work) {
+      continue;
+    }
+
+    scope_elide_.add(begin_handle);
+    scope_elide_.add(end_handle);
+
+#ifdef __ANDROID__
+    if (blender::perf::scope_names_enabled()) {
+      std::string body;
+      for (int k = 0; k < body_type_count && body.size() < 60; k++) {
+        if (!body.empty()) {
+          body += ',';
+        }
+        body += scope_node_short_name(body_types[k]);
+      }
+      const std::string name = render_graph.full_debug_group(begin_handle);
+      __android_log_print(ANDROID_LOG_WARN,
+                          "blender-scope",
+                          "    scope3 name=\"%s\" ELIDED=1 nodes=%d inside=%s",
+                          name.c_str(),
+                          body_nodes,
+                          body.empty() ? "(none)" : body.c_str());
+    }
+#endif
+  }
 }
 
 void VKCommandBuilder::apply_scope_merge_store_patches(VKRenderGraph &render_graph)
@@ -1071,6 +1233,15 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
          * stays open through this group. */
         if (node.type == VKNodeType::END_RENDERING) {
           scope_merged++;
+        }
+        continue;
+      }
+
+      if (scope_elide_.contains(node_handle)) {
+        /* Elided scope: the begin/end pair carries no load/store work of its own, so both nodes
+         * are dropped. Any synchronization node inside it is recorded where it is. */
+        if (node.type == VKNodeType::BEGIN_RENDERING) {
+          scope_elided++;
         }
         continue;
       }

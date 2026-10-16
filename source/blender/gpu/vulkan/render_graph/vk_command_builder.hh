@@ -125,6 +125,14 @@ class VKCommandBuilder {
   /** Number of joins applied, reported with the scope accounting. */
   uint32_t scope_merged = 0;
   /**
+   * Scopes whose body holds nothing but synchronization nodes. Their begin/end pair records no
+   * work of its own, so dropping the pair removes a full attachment load/store round trip while
+   * the barriers inside keep their place in the stream.
+   */
+  Set<NodeHandle> scope_elide_;
+  /** Number of elided scopes, reported with the scope accounting. */
+  uint32_t scope_elided = 0;
+  /**
    * Resource states before the barrier extraction. The extraction advances them in place, so a
    * re-run (a join dropped for a dirty boundary) needs them restored first.
    */
@@ -399,6 +407,14 @@ class VKCommandBuilder {
    * the still open scope. Returns true when at least one join was dropped.
    */
   bool drop_unsafe_scope_merges();
+
+  /**
+   * Mark the scopes whose body records nothing but synchronization nodes, so their begin/end
+   * pair can be dropped at recording. A scope that clears at its begin or holds any node other
+   * than a synchronization is left alone: this only ever removes an attachment load/store round
+   * trip that carries no writes.
+   */
+  void collect_scope_elisions(const VKRenderGraph &render_graph, Span<NodeHandle> node_handles);
 
   /** Copy the store ops of each joined scope onto the begin node that will be recorded. */
   void apply_scope_merge_store_patches(VKRenderGraph &render_graph);
