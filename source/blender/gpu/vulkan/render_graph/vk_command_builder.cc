@@ -79,6 +79,23 @@ bool VKCommandBuilder::group_touches_open_scope(const VKRenderGraph &render_grap
     for (const VKRenderGraphImage &node_link :
          render_graph.linked_images(node_handles[group_node_index]))
     {
+      /* A transfer layout is a layout transition by definition, and a transition is not legal
+       * while the pass is open. Checked on the node's declared layout rather than on the barrier
+       * list: the group's pre barriers are emitted at the top of the group's own iteration, which
+       * is before this decision is reached, so by here they have already been recorded. Reading
+       * the intent the node declares does not depend on emission order.
+       *
+       * GENERAL and SHADER_READ_ONLY are not rejected: they may already be the image's layout, and
+       * the render graph transitions only when it has to. TRANSFER_SRC and TRANSFER_DST always do.
+       * Measured: group 26 fuses a single COPY_IMAGE declaring handle 1 at layout 7
+       * (TRANSFER_DST_OPTIMAL), which is exactly this case. */
+      if (node_link.vk_image_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL ||
+          node_link.vk_image_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+      {
+        log_fusion("reject-transfer", group_index, next_group, node_handles, scope_links, 0,
+                   render_graph, "group needs a transfer layout transition");
+        return true;
+      }
       for (const VKRenderGraphImage &scope_link : scope_links) {
         if (node_link.resource.handle == scope_link.resource.handle) {
           log_fusion("reject-touch", group_index, next_group, node_handles, scope_links, 0,
