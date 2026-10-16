@@ -13,6 +13,8 @@
 
 #include "BKE_paint.hh"
 
+#include "BLI_perf_probe.hh"
+
 #include "draw_common_c.hh"
 #include "draw_debug.hh"
 #include "overlay_instance.hh"
@@ -62,7 +64,10 @@ void Instance::init()
     //                      BKE_scene_uses_blender_workbench(state.scene);
     state.use_in_front = true;
     state.is_wireframe_mode = (state.v3d->shading.type == OB_WIRE);
-    state.hide_overlays = (state.v3d->flag2 & V3D_HIDE_OVERLAYS) != 0;
+    /* `debug.blender.overlays 0` forces the same state as the header overlays toggle, for the
+     * on-device pass-cost runs; live-read so it can be flipped between two drags. */
+    state.hide_overlays = (state.v3d->flag2 & V3D_HIDE_OVERLAYS) != 0 ||
+                          blender::perf::overlays_forced_off();
     state.xray_enabled = XRAY_ACTIVE(state.v3d) && !state.is_depth_only_drawing;
     state.xray_enabled_and_not_wire = state.xray_enabled && (state.v3d->shading.type > OB_WIRE);
     state.xray_opacity = state.xray_enabled ? XRAY_ALPHA(state.v3d) : 1.0f;

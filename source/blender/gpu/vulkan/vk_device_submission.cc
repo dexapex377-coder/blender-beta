@@ -256,6 +256,9 @@ void VKDevice::submission_runner(VKDevice *device)
   };
   struct GPUProfilePending {
     uint64_t timeline;
+    /** Whole-submission timestamp pair, or UINT32_MAX when it could not be written. */
+    uint32_t global_begin_query = UINT32_MAX;
+    uint32_t global_end_query = UINT32_MAX;
     Vector<render_graph::VKScopeTimestamp> scopes;
   };
   VkQueryPool timestamp_pool = VK_NULL_HANDLE;
@@ -270,6 +273,10 @@ void VKDevice::submission_runner(VKDevice *device)
   uint64_t timestamp_submits = 0;
   double timestamp_submit_sum_ms = 0.0;
   double timestamp_submit_max_ms = 0.0;
+  /* Scope sums run alongside the whole-submission pair: the difference between the two is how
+   * much the scope boundaries overlap (see retire_timestamps). */
+  double timestamp_scope_sum_ms = 0.0;
+  double timestamp_scope_sum_max_ms = 0.0;
   {
     static const bool perf_enabled = []() {
       char value[PROP_VALUE_MAX] = {};
@@ -318,12 +325,17 @@ void VKDevice::submission_runner(VKDevice *device)
   uint64_t num_nodes = 0;
 
 #ifdef __ANDROID__
+  /* Pairs are allocated from the same pool as the scope pairs; the scopes advance the cursor
+   * themselves, so this only picks the two slots the whole-submission pair uses. */
   render_graph::VKScopeTimestampConfig timestamp_config;
   timestamp_config.pool = timestamp_pool;
   timestamp_config.pool_size = timestamp_pool_size;
   timestamp_config.cursor = &timestamp_cursor;
   timestamp_config.enabled = timestamps_enabled;
   command_builder.timestamps_configure(timestamp_config);
+
+  /** Queries of the whole-submission pair of the command buffer being recorded. */
+  uint32_t timestamp_global_begin = UINT32_MAX;
 
   /* Read back the timestamp pairs of completed submissions and fold them into the window report.
    * A submission's queries are only read once its timeline value has passed, so the results are
@@ -334,12 +346,14 @@ void VKDevice::submission_runner(VKDevice *device)
       if (pending.timeline > finished_timeline) {
         continue;
       }
-      double submit_ms = 0.0;
-      for (const render_graph::VKScopeTimestamp &scope : pending.scopes) {
+      /* Reads one timestamp pair and masks the ticks to the queue family's valid bits. */
+      auto read_pair = [&](const uint32_t begin_query,
+                           uint64_t &r_begin_ticks,
+                           uint64_t &r_end_ticks) {
         uint64_t results[2] = {0, 0};
         const VkResult result = device->functions.vkGetQueryPoolResults(device->vk_device_,
                                                                         timestamp_pool,
-                                                                        scope.begin_query,
+                                                                        begin_query,
                                                                         2,
                                                                         sizeof(results),
                                                                         results,
@@ -347,20 +361,60 @@ void VKDevice::submission_runner(VKDevice *device)
                                                                         VK_QUERY_RESULT_WAIT_BIT |
                                                                             VK_QUERY_RESULT_64_BIT);
         if (result != VK_SUCCESS) {
-          continue;
+          return false;
         }
-        uint64_t begin_ticks = results[0];
-        uint64_t end_ticks = results[1];
+        r_begin_ticks = results[0];
+        r_end_ticks = results[1];
         if (timestamp_valid_bits < 64) {
           const uint64_t mask = (uint64_t(1) << timestamp_valid_bits) - 1;
-          begin_ticks &= mask;
-          end_ticks &= mask;
-          if (end_ticks < begin_ticks) {
-            end_ticks += mask + 1;
+          r_begin_ticks &= mask;
+          r_end_ticks &= mask;
+          if (r_end_ticks < r_begin_ticks) {
+            r_end_ticks += mask + 1;
           }
         }
-        const double scope_ms = double(end_ticks - begin_ticks) * timestamp_period_ms;
-        submit_ms += scope_ms;
+        return true;
+      };
+
+      /* Whole-submission pair: every command in the buffer sits between its two writes, so this
+       * is the submission's real busy time, the number comparable with the frame period. The
+       * scope times cannot be added up to get it: a scope end waits with BOTTOM_OF_PIPE for all
+       * prior work to drain, while the next scope begins with TOP_OF_PIPE without waiting, so
+       * consecutive scope intervals overlap by the depth of the pipeline. That is why the raw
+       * scope sum used to come out well above the frame period. */
+      double global_ms = -1.0;
+      if (pending.global_begin_query != UINT32_MAX) {
+        uint64_t begin_ticks = 0, end_ticks = 0;
+        if (read_pair(pending.global_begin_query, begin_ticks, end_ticks)) {
+          global_ms = double(end_ticks - begin_ticks) * timestamp_period_ms;
+        }
+      }
+
+      /* Scope times, attributed so the intervals tile the submission instead of overlapping: a
+       * scope starts where the previous one stopped draining. The raw pairs in the pool are
+       * untouched; only the attribution changes. With that, the scope sum matches the
+       * whole-submission pair and each scope keeps a usable individual cost. */
+      double scope_sum_ms = 0.0;
+      uint64_t prev_end_ticks = 0;
+      bool has_prev_end = false;
+      for (const render_graph::VKScopeTimestamp &scope : pending.scopes) {
+        uint64_t begin_ticks = 0, end_ticks = 0;
+        if (!read_pair(scope.begin_query, begin_ticks, end_ticks)) {
+          continue;
+        }
+        uint64_t effective_begin = begin_ticks;
+        if (has_prev_end && prev_end_ticks > effective_begin) {
+          effective_begin = prev_end_ticks;
+        }
+        if (end_ticks < effective_begin) {
+          /* Never report a negative time if a counter wrapped or the driver returned the pair
+           * out of order. */
+          end_ticks = effective_begin;
+        }
+        prev_end_ticks = end_ticks;
+        has_prev_end = true;
+        const double scope_ms = double(end_ticks - effective_begin) * timestamp_period_ms;
+        scope_sum_ms += scope_ms;
         GPUProfileScope *accum = nullptr;
         for (GPUProfileScope &candidate : timestamp_stats) {
           if (candidate.tag == scope.tag && candidate.width == scope.width &&
@@ -389,11 +443,19 @@ void VKDevice::submission_runner(VKDevice *device)
         }
         timestamp_samples++;
       }
-      if (!pending.scopes.is_empty()) {
+      if (global_ms < 0.0 && !pending.scopes.is_empty()) {
+        /* No whole-submission pair for this one: the scope sum is the best available number. */
+        global_ms = scope_sum_ms;
+      }
+      if (global_ms >= 0.0) {
         timestamp_submits++;
-        timestamp_submit_sum_ms += submit_ms;
-        if (submit_ms > timestamp_submit_max_ms) {
-          timestamp_submit_max_ms = submit_ms;
+        timestamp_submit_sum_ms += global_ms;
+        if (global_ms > timestamp_submit_max_ms) {
+          timestamp_submit_max_ms = global_ms;
+        }
+        timestamp_scope_sum_ms += scope_sum_ms;
+        if (scope_sum_ms > timestamp_scope_sum_max_ms) {
+          timestamp_scope_sum_max_ms = scope_sum_ms;
         }
       }
       timestamp_pending.remove(i);
@@ -409,11 +471,14 @@ void VKDevice::submission_runner(VKDevice *device)
       char chunk[224];
       snprintf(chunk,
                sizeof(chunk),
-               "window: scopes=%llu submits=%llu gpu/submit avg=%.2fms max=%.2fms",
+               "window: scopes=%llu submits=%llu gpu/submit avg=%.2fms max=%.2fms "
+               "scopesum avg=%.2fms max=%.2fms",
                (unsigned long long)timestamp_samples,
                (unsigned long long)timestamp_submits,
                timestamp_submits ? timestamp_submit_sum_ms / double(timestamp_submits) : 0.0,
-               timestamp_submit_max_ms);
+               timestamp_submit_max_ms,
+               timestamp_submits ? timestamp_scope_sum_ms / double(timestamp_submits) : 0.0,
+               timestamp_scope_sum_max_ms);
       report = chunk;
       for (const GPUProfileScope &scope : timestamp_stats) {
         if (report.size() > 1400) {
@@ -438,6 +503,8 @@ void VKDevice::submission_runner(VKDevice *device)
       timestamp_submits = 0;
       timestamp_submit_sum_ms = 0.0;
       timestamp_submit_max_ms = 0.0;
+      timestamp_scope_sum_ms = 0.0;
+      timestamp_scope_sum_max_ms = 0.0;
     }
   };
 #endif
@@ -485,6 +552,20 @@ void VKDevice::submission_runner(VKDevice *device)
       command_buffer = std::make_optional<render_graph::VKCommandBufferWrapper>(
           vk_command_buffer, device->functions, device->extensions_, device->workarounds_);
       command_buffer->begin_recording();
+#ifdef __ANDROID__
+      if (timestamps_enabled) {
+        /* Whole-submission pair: opened here, at the first command of the buffer, closed right
+         * before the buffer is submitted. */
+        if (timestamp_cursor + 2 > timestamp_pool_size) {
+          timestamp_cursor = 0;
+        }
+        timestamp_global_begin = timestamp_cursor;
+        timestamp_cursor += 2;
+        command_buffer->reset_query_pool(timestamp_pool, timestamp_global_begin, 2);
+        command_buffer->write_timestamp(
+            timestamp_pool, timestamp_global_begin, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+      }
+#endif
     }
 
     BLI_assert(vk_command_buffer != VK_NULL_HANDLE);
@@ -503,6 +584,13 @@ void VKDevice::submission_runner(VKDevice *device)
     num_nodes += node_handles.size();
 
     if (submit_task->submit_to_device) {
+#ifdef __ANDROID__
+      if (timestamps_enabled && timestamp_global_begin != UINT32_MAX) {
+        command_buffer->write_timestamp(timestamp_pool,
+                                        timestamp_global_begin + 1,
+                                        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+      }
+#endif
       /* Finalize current command buffer. */
       command_buffer->end_recording();
 
@@ -575,20 +663,28 @@ void VKDevice::submission_runner(VKDevice *device)
         }
       }
 #ifdef __ANDROID__
-      /* Hand the scope timestamps over for readback. The pairs are only read when the commands
-       * were really submitted, otherwise no query is ever written for them. */
+      /* Hand the timestamps over for readback. The pairs are only read when the commands were
+       * really submitted, otherwise no query is ever written for them. */
       if (timestamps_enabled) {
         const Span<render_graph::VKScopeTimestamp> scopes =
             command_builder.scope_timestamps_get();
-        if (submit_result == VK_SUCCESS && !device->is_device_lost() && !scopes.is_empty()) {
+        const bool global_valid = timestamp_global_begin != UINT32_MAX;
+        if (submit_result == VK_SUCCESS && !device->is_device_lost() &&
+            (!scopes.is_empty() || global_valid))
+        {
           timestamp_pending.append(GPUProfilePending{});
           GPUProfilePending &pending = timestamp_pending.last();
           pending.timeline = submit_task->timeline;
+          if (global_valid) {
+            pending.global_begin_query = timestamp_global_begin;
+            pending.global_end_query = timestamp_global_begin + 1;
+          }
           for (const render_graph::VKScopeTimestamp &scope : scopes) {
             pending.scopes.append(scope);
           }
         }
         command_builder.scope_timestamps_clear();
+        timestamp_global_begin = UINT32_MAX;
       }
 #endif
       if (submit_task->wait_for_submission != nullptr) {

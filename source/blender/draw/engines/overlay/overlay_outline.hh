@@ -11,6 +11,8 @@
 #include "overlay_base.hh"
 #include "overlay_grease_pencil.hh"
 
+#include "BLI_perf_probe.hh"
+
 #include "draw_common.hh"
 
 #include "DNA_userdef_types.h"
@@ -49,6 +51,8 @@ class Outline : Overlay {
   {
     enabled_ = !res.is_selection();
     enabled_ &= state.v3d && (state.v3d_flag & V3D_SELECT_OUTLINE);
+    /* `debug.blender.outline_selected 0` drops only this pass pair for the pass-cost runs. */
+    enabled_ &= !blender::perf::outline_selected_forced_off();
 
     flat_objects_.clear();
 

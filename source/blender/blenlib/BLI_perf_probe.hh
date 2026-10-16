@@ -69,6 +69,42 @@ inline bool scope_names_enabled()
 #endif
 }
 
+/** Measurement switches for the on-device pass-cost runs. Read on every call (not cached) so a
+ * case can be toggled between two interactions without restarting the app, unlike the switches
+ * above. `0` forces the feature off; absent or any other value leaves the UI setting in charge.
+ *
+ * - `debug.blender.overlays 0`: 3D viewport overlays off, same effect on the passes as the header
+ *   overlays toggle (also turns the selected-object outline off, like the toggle does).
+ * - `debug.blender.outline 0`: Workbench shading outline off (the shading popover checkbox).
+ * - `debug.blender.outline_selected 0`: only the selected-object outline (overlays popover). */
+inline bool debug_prop_off(const char *name)
+{
+#ifdef __ANDROID__
+  char value[PROP_VALUE_MAX] = {};
+  if (__system_property_get(name, value) > 0 && value[0] != '\0') {
+    return atoi(value) == 0;
+  }
+#else
+  (void)name;
+#endif
+  return false;
+}
+
+inline bool overlays_forced_off()
+{
+  return debug_prop_off("debug.blender.overlays");
+}
+
+inline bool outline_forced_off()
+{
+  return debug_prop_off("debug.blender.outline");
+}
+
+inline bool outline_selected_forced_off()
+{
+  return debug_prop_off("debug.blender.outline_selected");
+}
+
 using TimePoint = std::chrono::steady_clock::time_point;
 
 /** Rolling-average accumulator; one static instance per `PERF_ZONE` call site. */

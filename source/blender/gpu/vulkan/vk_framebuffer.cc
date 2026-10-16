@@ -906,16 +906,14 @@ void VKFrameBuffer::rendering_ensure_dynamic_rendering(VKContext &context)
     break;
   }
 
-  /* Dynamic rendering carries the formats in VkPipelineRenderingCreateInfo instead, but the render
-   * pass fallback has to build a VkRenderPass from them, and the framebuffer it wraps needs the
-   * same formats. Copy the ones computed above; only read when the fallback is active. */
-  if (VKRenderPassFallback::is_active()) {
-    for (int i = 0; i < color_attachment_size && i < 8; i++) {
-      begin_rendering.node_data.color_formats[i] = color_attachment_formats_[i];
-    }
-    begin_rendering.node_data.depth_format = depth_attachment_format_;
-    begin_rendering.node_data.stencil_format = stencil_attachment_format_;
+  /* Dynamic rendering carries the formats in VkPipelineRenderingCreateInfo, but they are also
+   * needed to build a VkRenderPass in the fallback path, and the scope diagnostics print them.
+   * Filled unconditionally so both readers see the same values; empty slots stay UNDEFINED. */
+  for (int i = 0; i < color_attachment_size && i < 8; i++) {
+    begin_rendering.node_data.color_formats[i] = color_attachment_formats_[i];
   }
+  begin_rendering.node_data.depth_format = depth_attachment_format_;
+  begin_rendering.node_data.stencil_format = stencil_attachment_format_;
 
   context.render_graph().add_node(begin_rendering);
 }

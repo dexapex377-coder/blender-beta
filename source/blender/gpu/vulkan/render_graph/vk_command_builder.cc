@@ -117,6 +117,48 @@ void VKCommandBuilder::scope_detail(const VKBeginRenderingData &begin_data,
 #ifdef __ANDROID__
 namespace {
 
+/** Short token for the attachment formats this backend produces, so the scope lines stay
+ * readable. Unknown formats fall back to their numeric value. */
+std::string scope_format_short_name(VkFormat format)
+{
+  switch (format) {
+    case VK_FORMAT_UNDEFINED:
+      return "undef";
+    case VK_FORMAT_R16G16B16A16_SFLOAT:
+      return "RGBA16F";
+    case VK_FORMAT_R16G16_SFLOAT:
+      return "RG16F";
+    case VK_FORMAT_R32_SFLOAT:
+      return "R32F";
+    case VK_FORMAT_R8G8B8A8_UNORM:
+      return "RGBA8";
+    case VK_FORMAT_B8G8R8A8_UNORM:
+      return "BGRA8";
+    case VK_FORMAT_R8G8B8A8_SRGB:
+      return "RGBA8s";
+    case VK_FORMAT_B8G8R8A8_SRGB:
+      return "BGRA8s";
+    case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+      return "RGB10A2";
+    case VK_FORMAT_R16_UINT:
+      return "R16U";
+    case VK_FORMAT_R32_UINT:
+      return "R32U";
+    case VK_FORMAT_R16G16B16A16_UINT:
+      return "RGBA16U";
+    case VK_FORMAT_D32_SFLOAT:
+      return "D32";
+    case VK_FORMAT_D32_SFLOAT_S8_UINT:
+      return "D32S8";
+    case VK_FORMAT_D24_UNORM_S8_UINT:
+      return "D24S8";
+    case VK_FORMAT_D16_UNORM:
+      return "D16";
+    default:
+      return "f" + std::to_string(int(format));
+  }
+}
+
 const char *scope_node_short_name(const VKNodeType type)
 {
   switch (type) {
@@ -214,7 +256,8 @@ void scope_node_identity(const VKRenderGraphNode &node, std::string &r_out)
 void VKCommandBuilder::scope_names_detail(VKRenderGraph &render_graph,
                                           const Span<NodeHandle> node_handles,
                                           const int64_t flat_index,
-                                          const NodeHandle node_handle) const
+                                          const NodeHandle node_handle,
+                                          const VKBeginRenderingData &begin_data) const
 {
   if (!blender::perf::scope_names_enabled()) {
     return;
@@ -280,14 +323,53 @@ void VKCommandBuilder::scope_names_detail(VKRenderGraph &render_graph,
     }
   }
 
+  /* Attachment formats and load/store ops, straight off the begin node: what the pass table needs
+   * without guessing. Empty slots (null view) are skipped, matching the set= line.
+   * `lo`: 0=LOAD, 1=CLEAR, 2=DONT_CARE. `st`: 0=STORE, 1=DONT_CARE. */
+  std::string attachments;
+  char att_chunk[96];
+  const uint32_t color_attachment_count = begin_data.vk_rendering_info.colorAttachmentCount;
+  for (uint32_t i = 0; i < color_attachment_count; i++) {
+    if (begin_data.color_attachments[i].imageView == VK_NULL_HANDLE) {
+      continue;
+    }
+    snprintf(att_chunk,
+             sizeof(att_chunk),
+             " c%u=%s lo=%u st=%u",
+             i,
+             scope_format_short_name(begin_data.color_formats[i]).c_str(),
+             uint32_t(begin_data.color_attachments[i].loadOp),
+             uint32_t(begin_data.color_attachments[i].storeOp));
+    attachments += att_chunk;
+  }
+  if (begin_data.vk_rendering_info.pDepthAttachment != nullptr) {
+    snprintf(att_chunk,
+             sizeof(att_chunk),
+             " d=%s lo=%u st=%u",
+             scope_format_short_name(begin_data.depth_format).c_str(),
+             uint32_t(begin_data.depth_attachment.loadOp),
+             uint32_t(begin_data.depth_attachment.storeOp));
+    attachments += att_chunk;
+  }
+  if (begin_data.vk_rendering_info.pStencilAttachment != nullptr) {
+    snprintf(att_chunk,
+             sizeof(att_chunk),
+             " s=%s lo=%u st=%u",
+             scope_format_short_name(begin_data.stencil_format).c_str(),
+             uint32_t(begin_data.stencil_attachment.loadOp),
+             uint32_t(begin_data.stencil_attachment.storeOp));
+    attachments += att_chunk;
+  }
+
   __android_log_print(ANDROID_LOG_WARN,
                       "blender-scope",
-                      "    scope2 name=\"%s\" draws=%d nodes=%d inside=%s between=%s",
+                      "    scope2 name=\"%s\" draws=%d nodes=%d inside=%s between=%s att=%s",
                       name.c_str(),
                       draws,
                       inside_nodes,
                       inside.empty() ? "(none)" : inside.c_str(),
-                      between.c_str());
+                      between.c_str(),
+                      attachments.empty() ? "(none)" : attachments.c_str());
 }
 #endif
 
@@ -1282,9 +1364,9 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
             }
           };
           for (uint32_t i = 0; i < color_count; i++) {
-            /* Empty slots carry a DONT_CARE placeholder and a null view. The format array cannot
-             * be the filter here: it is only filled when the render pass fallback is active,
-             * which left this accounting reading all zeros on the native path. */
+            /* Empty slots carry a DONT_CARE placeholder and a null view, so the view is the
+             * filter here. The format array is filled from the producer side and is only
+             * identically zero for empty slots. */
             if (begin_data.color_attachments[i].imageView == VK_NULL_HANDLE) {
               continue;
             }
@@ -1304,7 +1386,7 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
                                                                                    node_handle,
                                                                                    flat_index);
           scope_detail(begin_data, prev_node_type, directly_adjacent, matches_previous);
-          scope_names_detail(render_graph, node_handles, flat_index, node_handle);
+          scope_names_detail(render_graph, node_handles, flat_index, node_handle, begin_data);
           /* Measurement only. A scope targeting the same attachments as the previous one is a
            * merge candidate, and there are two kinds of those: adjacent (the END/BEGIN pair is
            * dropped and both draw runs become one scope) and separated by other work (the

@@ -28,6 +28,8 @@
 
 #include "GPU_capabilities.hh"
 
+#include "BLI_perf_probe.hh"
+
 #ifdef __ANDROID__
 #  include <cstdlib>
 #  include <sys/system_properties.h>
@@ -272,7 +274,9 @@ void SceneState::init(const DRWContext *context,
                                                              V3D_SHADING_CAVITY_CURVATURE,
                                                              V3D_SHADING_CAVITY_BOTH);
   draw_shadows = shading.flag & V3D_SHADING_SHADOW;
-  draw_outline = shading.flag & V3D_SHADING_OBJECT_OUTLINE;
+  /* `debug.blender.outline 0` also drops the Workbench shading outline for the pass-cost runs. */
+  draw_outline = (shading.flag & V3D_SHADING_OBJECT_OUTLINE) &&
+                 !blender::perf::outline_forced_off();
   draw_dof = camera && camera->dof.flag & CAM_DOF_ENABLED &&
              shading.flag & V3D_SHADING_DEPTH_OF_FIELD;
 
