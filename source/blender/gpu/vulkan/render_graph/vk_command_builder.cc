@@ -52,7 +52,10 @@ void VKCommandBuilder::build_nodes(VKRenderGraph &render_graph,
 }
 
 #ifdef __ANDROID__
-void VKCommandBuilder::scope_detail(const VKBeginRenderingData &begin_data) const
+void VKCommandBuilder::scope_detail(const VKBeginRenderingData &begin_data,
+                                    const int prev_node_type,
+                                    const bool directly_adjacent,
+                                    const bool matches_previous) const
 {
   static const bool log_enabled = []() {
     char value[PROP_VALUE_MAX] = {};
@@ -84,7 +87,7 @@ void VKCommandBuilder::scope_detail(const VKBeginRenderingData &begin_data) cons
   __android_log_print(ANDROID_LOG_WARN,
                       "blender-scope",
                       "  scope set=%016llx area=%dx%d+%d+%d color=%u depth=%u loadOp=%u "
-                      "color0=%016llx",
+                      "color0=%016llx prev=%d adj=%d match=%d",
                       (unsigned long long)view_tag,
                       area.extent.width,
                       area.extent.height,
@@ -94,18 +97,58 @@ void VKCommandBuilder::scope_detail(const VKBeginRenderingData &begin_data) cons
                       begin_data.vk_rendering_info.pDepthAttachment != nullptr ? 1 : 0,
                       depth_op,
                       (unsigned long long)reinterpret_cast<uintptr_t>(
-                          begin_data.color_attachments[0].imageView));
+                          begin_data.color_attachments[0].imageView),
+                      prev_node_type,
+                      directly_adjacent ? 1 : 0,
+                      matches_previous ? 1 : 0);
 }
 #endif
 
 /* Everything a scope join rests on: the two scopes have to fit one render pass (same attachments,
- * aspects, mip/layer ranges and render area) and the following scope must not clear, since a
- * clear would have to become a mid-pass vkCmdClearAttachments to survive the join. Both are
- * read-only checks over the graph, so they can be done while the groups are walked. */
+ * aspects, mip/layer ranges, views and depth/stencil shape) and the following scope must not
+ * clear, since a clear would have to become a mid-pass vkCmdClearAttachments to survive the join.
+ * The render area of the second scope has to fit into the first one's; a sub-rect is allowed when
+ * every command the second scope records clips itself to that sub-rect. These are read-only checks
+ * over the graph, so they can be done while the groups are walked. */
 
-static bool scope_begins_match(const VKRenderGraph &render_graph,
-                               NodeHandle first_begin,
-                               NodeHandle second_begin)
+static bool rect_equal(const VkRect2D &a, const VkRect2D &b)
+{
+  return a.offset.x == b.offset.x && a.offset.y == b.offset.y &&
+         a.extent.width == b.extent.width && a.extent.height == b.extent.height;
+}
+
+static bool rect_contains(const VkRect2D &outer, const VkRect2D &inner)
+{
+  return inner.offset.x >= outer.offset.x && inner.offset.y >= outer.offset.y &&
+         int64_t(inner.offset.x) + int64_t(inner.extent.width) <=
+             int64_t(outer.offset.x) + int64_t(outer.extent.width) &&
+         int64_t(inner.offset.y) + int64_t(inner.extent.height) <=
+             int64_t(outer.offset.y) + int64_t(outer.extent.height);
+}
+
+/** The scissor rects a draw node carries, empty when it carries none. */
+static Span<VkRect2D> draw_node_scissors(VKRenderGraphStorage &storage, VKRenderGraphNode &node)
+{
+  switch (node.type) {
+    case VKNodeType::DRAW:
+      return VKDrawNode::storage_data(storage, node.storage_index).graphics.viewport.scissors;
+    case VKNodeType::DRAW_INDEXED:
+      return VKDrawIndexedNode::storage_data(storage, node.storage_index).graphics.viewport.scissors;
+    case VKNodeType::DRAW_INDIRECT:
+      return VKDrawIndirectNode::storage_data(storage, node.storage_index).graphics.viewport.scissors;
+    case VKNodeType::DRAW_INDEXED_INDIRECT:
+      return VKDrawIndexedIndirectNode::storage_data(storage, node.storage_index)
+          .graphics.viewport.scissors;
+    default:
+      return {};
+  }
+}
+
+bool VKCommandBuilder::scope_begins_match(VKRenderGraph &render_graph,
+                                          const Span<NodeHandle> node_handles,
+                                          const NodeHandle first_begin,
+                                          const NodeHandle second_begin,
+                                          const int64_t second_begin_index)
 {
   const Span<VKRenderGraphImage> first_links = render_graph.linked_images(first_begin);
   const Span<VKRenderGraphImage> second_links = render_graph.linked_images(second_begin);
@@ -175,10 +218,44 @@ static bool scope_begins_match(const VKRenderGraph &render_graph,
 
   const VkRect2D &first_area = first_data.vk_rendering_info.renderArea;
   const VkRect2D &second_area = second_data.vk_rendering_info.renderArea;
-  return first_area.offset.x == second_area.offset.x &&
-         first_area.offset.y == second_area.offset.y &&
-         first_area.extent.width == second_area.extent.width &&
-         first_area.extent.height == second_area.extent.height;
+  if (rect_equal(first_area, second_area)) {
+    /* Equal area: the render area clips the same pixels before and after the join, whatever
+     * scissors the draws carry. */
+    return true;
+  }
+  if (!rect_contains(first_area, second_area)) {
+    return false;
+  }
+  /* The join widens the area the second scope records under, so every command it records has to
+   * stay inside its own (smaller) area: only then do the rasterized pixels stay identical. The
+   * draws of a scope normally carry exactly that area as their scissor, since both are built from
+   * the same framebuffer scissor rect (see `VKFrameBuffer::render_area_update`). */
+  for (int64_t i = second_begin_index + 1; i < int64_t(node_handles.size()); i++) {
+    VKRenderGraphNode &node = render_graph.nodes_[node_handles[i]];
+    if (node.type == VKNodeType::END_RENDERING) {
+      return true;
+    }
+    if (node.type == VKNodeType::CLEAR_ATTACHMENTS) {
+      /* A mid-pass clear rasterizes its own rects, which are not checked here. */
+      return false;
+    }
+    if (!node_type_is_within_rendering(node.type)) {
+      /* A transfer, a dispatch or a restart sits in between: not a plain draw run. */
+      return false;
+    }
+    const Span<VkRect2D> scissors = draw_node_scissors(render_graph.storage_, node);
+    if (scissors.is_empty()) {
+      /* No scissor recorded: the clipping is pipeline state, not this render area. */
+      return false;
+    }
+    for (const VkRect2D &scissor : scissors) {
+      if (!rect_contains(second_area, scissor)) {
+        return false;
+      }
+    }
+  }
+  /* The scope does not close inside this list. */
+  return false;
 }
 
 static bool scope_begin_clears(const VKBeginRenderingData &begin_data)
@@ -681,7 +758,7 @@ bool VKCommandBuilder::try_scope_merge(VKRenderGraph &render_graph,
   if (scope_merge_dropped_.contains(end_rendering)) {
     return false;
   }
-  if (!scope_begins_match(render_graph, owner_begin, begin_rendering)) {
+  if (!scope_begins_match(render_graph, node_handles, owner_begin, begin_rendering, begin_index)) {
     return false;
   }
   if (scope_begin_clears(render_graph.storage_.begin_rendering[render_graph.nodes_[begin_rendering]
@@ -819,7 +896,17 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
           if (begin_data.vk_rendering_info.pDepthAttachment != nullptr) {
             count_load_op(begin_data.depth_attachment.loadOp);
           }
-          scope_detail(begin_data);
+          const int64_t flat_index = group_nodes.first();
+          const int prev_node_type = flat_index > 0 ?
+                                         int(render_graph.nodes_[node_handles[flat_index - 1]].type) :
+                                         -1;
+          const bool directly_adjacent = prev_node_type == int(VKNodeType::END_RENDERING);
+          const bool matches_previous = rendering_scope != 0 && scope_begins_match(render_graph,
+                                                                                   node_handles,
+                                                                                   rendering_scope,
+                                                                                   node_handle,
+                                                                                   flat_index);
+          scope_detail(begin_data, prev_node_type, directly_adjacent, matches_previous);
           /* Measurement only. A scope targeting the same attachments as the previous one is a
            * merge candidate, and there are two kinds of those: adjacent (the END/BEGIN pair is
            * dropped and both draw runs become one scope) and separated by other work (the
@@ -831,15 +918,11 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
            * the same holds for dispatch. Nothing is built on these numbers yet. The previous
            * scope's begin node is still in rendering_scope here; nothing else has overwritten it
            * since its END_RENDERING ran. */
-          const int64_t flat_index = group_nodes.first();
           if (rendering_scope != 0) {
-            const bool directly_adjacent =
-                flat_index > 0 && render_graph.nodes_[node_handles[flat_index - 1]].type ==
-                                      VKNodeType::END_RENDERING;
             if (directly_adjacent) {
               scope_adjacent++;
             }
-            if (scope_begins_match(render_graph, rendering_scope, node_handle)) {
+            if (matches_previous) {
               scope_repeat++;
               if (!directly_adjacent) {
                 scope_repeat_foreign++;

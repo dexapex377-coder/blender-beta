@@ -96,7 +96,10 @@ class VKCommandBuilder {
   Vector<VKResourceStateTracker::Resource> resource_states_before_extraction_;
 
   /** Android only. One line per scope, behind the android.perf switch. */
-  void scope_detail(const VKBeginRenderingData &begin_data) const;
+  void scope_detail(const VKBeginRenderingData &begin_data,
+                    int prev_node_type,
+                    bool directly_adjacent,
+                    bool matches_previous) const;
 
   struct Barrier {
     /** Index range into `VKCommandBuilder::vk_buffer_memory_barriers_` */
@@ -291,6 +294,25 @@ class VKCommandBuilder {
   void extract_barriers_pass(VKRenderGraph &render_graph,
                              Span<NodeHandle> node_handles,
                              bool use_local_read);
+
+  /**
+   * Whether the scope the second begin opens can continue the scope the first begin opened: same
+   * attachments (handle, aspect, mip/layer range), same views in the same slots, same depth and
+   * stencil shape, and a render area that fits the first scope's.
+   *
+   * The render area of a scope is the framebuffer scissor rect whenever the scissor test is on
+   * (see `VKFrameBuffer::render_area_update`) and the draws of the scope carry that same rect as
+   * their dynamic scissor. A scope whose area is merely a sub-rect of the first one can join it
+   * when every draw it records clips itself to that sub-rect: the draws rasterize the same pixels
+   * inside the wider pass, which just keeps a larger load/store region. `second_begin_index` is
+   * the position of the second begin in the flat node list, used to look at what that scope
+   * records before it closes.
+   */
+  bool scope_begins_match(VKRenderGraph &render_graph,
+                          Span<NodeHandle> node_handles,
+                          NodeHandle first_begin,
+                          NodeHandle second_begin,
+                          int64_t second_begin_index);
 
   /**
    * Try to join the scope this END_RENDERING closes with the scope the immediately following
