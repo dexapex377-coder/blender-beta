@@ -69,6 +69,32 @@ class VKCommandBuilder {
   uint32_t scope_repeat = 0;
   uint32_t scope_repeat_foreign = 0;
 
+  /**
+   * A join between two scopes: an END_RENDERING immediately followed by a BEGIN_RENDERING on the
+   * same attachments and render area. Nothing is recorded between the two nodes, so the pair can
+   * be dropped and the second draw run keeps the scope open instead of flushing its tiles.
+   *
+   * Filled by the barrier extraction, consumed by the recording phase.
+   */
+  struct ScopeMerge {
+    NodeHandle end_rendering = 0;
+    NodeHandle begin_rendering = 0;
+    /** The begin node that opens the scope being kept open, which carries the store ops. */
+    NodeHandle owner_begin = 0;
+    /** Group of the END node. The joined group boundary is `group_index` to `group_index + 1`. */
+    int64_t group_index = 0;
+  };
+  Set<NodeHandle> scope_merge_skip_;
+  Set<NodeHandle> scope_merge_dropped_;
+  Vector<ScopeMerge> scope_merges_;
+  /** Number of joins applied, reported with the scope accounting. */
+  uint32_t scope_merged = 0;
+  /**
+   * Resource states before the barrier extraction. The extraction advances them in place, so a
+   * re-run (a join dropped for a dirty boundary) needs them restored first.
+   */
+  Vector<VKResourceStateTracker::Resource> resource_states_before_extraction_;
+
   /** Android only. One line per scope, behind the android.perf switch. */
   void scope_detail(const VKBeginRenderingData &begin_data) const;
 
@@ -257,6 +283,40 @@ class VKCommandBuilder {
   void groups_extract_barriers(VKRenderGraph &render_graph,
                                Span<NodeHandle> node_handles,
                                bool use_local_read);
+
+  /**
+   * One pass over the nodes, extracting the barriers with the marked scope joins applied. Called
+   * again from a clean state whenever a join has to be dropped.
+   */
+  void extract_barriers_pass(VKRenderGraph &render_graph,
+                             Span<NodeHandle> node_handles,
+                             bool use_local_read);
+
+  /**
+   * Try to join the scope this END_RENDERING closes with the scope the immediately following
+   * BEGIN_RENDERING opens, marking both nodes in `scope_merge_skip_` when the pair is legal.
+   *
+   * Returns true when the pair was marked, in which case the close is skipped.
+   */
+  bool try_scope_merge(VKRenderGraph &render_graph,
+                       Span<NodeHandle> node_handles,
+                       int64_t group_node_index,
+                       int64_t group_index,
+                       NodeHandle owner_begin);
+
+  /**
+   * Drop the marked joins whose boundary carries barriers. Recorded there they would sit inside
+   * the still open scope. Returns true when at least one join was dropped.
+   */
+  bool drop_unsafe_scope_merges();
+
+  /** Copy the store ops of each joined scope onto the begin node that will be recorded. */
+  void apply_scope_merge_store_patches(VKRenderGraph &render_graph);
+
+  inline bool scope_merge_skipped(NodeHandle node_handle) const
+  {
+    return scope_merge_skip_.contains(node_handle);
+  }
 
   /**
    * Record all the commands for all the groups to the command buffer.

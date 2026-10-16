@@ -98,6 +98,142 @@ void VKCommandBuilder::scope_detail(const VKBeginRenderingData &begin_data) cons
 }
 #endif
 
+/* Everything a scope join rests on: the two scopes have to fit one render pass (same attachments,
+ * aspects, mip/layer ranges and render area) and the following scope must not clear, since a
+ * clear would have to become a mid-pass vkCmdClearAttachments to survive the join. Both are
+ * read-only checks over the graph, so they can be done while the groups are walked. */
+
+static bool scope_begins_match(const VKRenderGraph &render_graph,
+                               NodeHandle first_begin,
+                               NodeHandle second_begin)
+{
+  const Span<VKRenderGraphImage> first_links = render_graph.linked_images(first_begin);
+  const Span<VKRenderGraphImage> second_links = render_graph.linked_images(second_begin);
+  if (first_links.size() != second_links.size()) {
+    return false;
+  }
+  for (const VKRenderGraphImage &second_link : second_links) {
+    bool found = false;
+    for (const VKRenderGraphImage &first_link : first_links) {
+      if (first_link.resource.handle == second_link.resource.handle &&
+          first_link.vk_image_aspect == second_link.vk_image_aspect &&
+          first_link.subimage.mipmap_level == second_link.subimage.mipmap_level &&
+          first_link.subimage.mipmap_count == second_link.subimage.mipmap_count &&
+          first_link.subimage.layer_base == second_link.subimage.layer_base &&
+          first_link.subimage.layer_count == second_link.subimage.layer_count)
+      {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      return false;
+    }
+  }
+
+  const VKBeginRenderingData &first_data =
+      render_graph.storage_.begin_rendering[render_graph.nodes_[first_begin].storage_index];
+  const VKBeginRenderingData &second_data =
+      render_graph.storage_.begin_rendering[render_graph.nodes_[second_begin].storage_index];
+
+  /* The resource comparison above matches the image; two scopes can bind the same image through
+   * different views (sRGB against linear), and one render pass can only carry one of them. The
+   * begin node of the first scope is the one that continues to be recorded, so only its views
+   * have to cover the second scope. */
+  if (first_data.vk_rendering_info.colorAttachmentCount !=
+      second_data.vk_rendering_info.colorAttachmentCount)
+  {
+    return false;
+  }
+  for (uint32_t i = 0; i < first_data.vk_rendering_info.colorAttachmentCount; i++) {
+    if (first_data.color_attachments[i].imageView !=
+        second_data.color_attachments[i].imageView)
+    {
+      return false;
+    }
+  }
+  const bool first_has_depth = first_data.vk_rendering_info.pDepthAttachment != nullptr;
+  const bool second_has_depth = second_data.vk_rendering_info.pDepthAttachment != nullptr;
+  if (first_has_depth != second_has_depth) {
+    return false;
+  }
+  if (first_has_depth && first_data.depth_attachment.imageView !=
+                            second_data.depth_attachment.imageView)
+  {
+    return false;
+  }
+  const bool first_has_stencil = first_data.vk_rendering_info.pStencilAttachment != nullptr;
+  const bool second_has_stencil = second_data.vk_rendering_info.pStencilAttachment != nullptr;
+  if (first_has_stencil != second_has_stencil) {
+    return false;
+  }
+  if (first_has_stencil && first_data.stencil_attachment.imageView !=
+                              second_data.stencil_attachment.imageView)
+  {
+    return false;
+  }
+
+  const VkRect2D &first_area = first_data.vk_rendering_info.renderArea;
+  const VkRect2D &second_area = second_data.vk_rendering_info.renderArea;
+  return first_area.offset.x == second_area.offset.x &&
+         first_area.offset.y == second_area.offset.y &&
+         first_area.extent.width == second_area.extent.width &&
+         first_area.extent.height == second_area.extent.height;
+}
+
+static bool scope_begin_clears(const VKBeginRenderingData &begin_data)
+{
+  const uint32_t color_count = begin_data.vk_rendering_info.colorAttachmentCount;
+  for (uint32_t i = 0; i < color_count; i++) {
+    if (begin_data.color_attachments[i].imageView == VK_NULL_HANDLE) {
+      continue;
+    }
+    if (begin_data.color_attachments[i].loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) {
+      return true;
+    }
+  }
+  if (begin_data.vk_rendering_info.pDepthAttachment != nullptr &&
+      begin_data.depth_attachment.loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) {
+    return true;
+  }
+  if (begin_data.vk_rendering_info.pStencilAttachment != nullptr &&
+      begin_data.stencil_attachment.loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) {
+    return true;
+  }
+  return false;
+}
+
+/* The joined scope stores what either scope needed stored, so the store ops of the following
+ * scope are copied onto the begin node that continues to be recorded. Turning a DONT_CARE store
+ * into STORE is always allowed; both sets of consumers stay correct. */
+static void scope_begin_join_stores(VKBeginRenderingData &owner_data,
+                                    const VKBeginRenderingData &next_data)
+{
+  const uint32_t owner_count = owner_data.vk_rendering_info.colorAttachmentCount;
+  const uint32_t next_count = next_data.vk_rendering_info.colorAttachmentCount;
+  const uint32_t color_count = owner_count < next_count ? owner_count : next_count;
+  for (uint32_t i = 0; i < color_count; i++) {
+    if (owner_data.color_attachments[i].imageView == VK_NULL_HANDLE) {
+      continue;
+    }
+    if (next_data.color_attachments[i].storeOp == VK_ATTACHMENT_STORE_OP_STORE) {
+      owner_data.color_attachments[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    }
+  }
+  if (owner_data.vk_rendering_info.pDepthAttachment != nullptr &&
+      next_data.vk_rendering_info.pDepthAttachment != nullptr &&
+      next_data.depth_attachment.storeOp == VK_ATTACHMENT_STORE_OP_STORE)
+  {
+    owner_data.depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  }
+  if (owner_data.vk_rendering_info.pStencilAttachment != nullptr &&
+      next_data.vk_rendering_info.pStencilAttachment != nullptr &&
+      next_data.stencil_attachment.storeOp == VK_ATTACHMENT_STORE_OP_STORE)
+  {
+    owner_data.stencil_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  }
+}
+
 void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                                        VKCommandBufferInterface &command_buffer,
                                        Span<NodeHandle> node_handles)
@@ -118,7 +254,7 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                           "blender-scope",
                           "scopes/frame=%u pixels/frame=%llu MPix/scope=%llu "
                           "loadOp: clear=%u load=%u dontcare=%u  fallback=%d  "
-                          "adjacent=%u mergeable=%u loadok=%u repeat=%u repeatsep=%u",
+                          "adjacent=%u mergeable=%u loadok=%u repeat=%u repeatsep=%u merged=%u",
                           uint32_t(scope_count / scope_report_frames),
                           (unsigned long long)(scope_pixels / scope_report_frames),
                           scope_count ?
@@ -132,7 +268,8 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                           uint32_t(scope_mergeable / scope_report_frames),
                           uint32_t(scope_mergeable_loadok / scope_report_frames),
                           uint32_t(scope_repeat / scope_report_frames),
-                          uint32_t(scope_repeat_foreign / scope_report_frames));
+                          uint32_t(scope_repeat_foreign / scope_report_frames),
+                          uint32_t(scope_merged / scope_report_frames));
     }
     scope_pixels = 0;
     scope_count = 0;
@@ -144,6 +281,7 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
     scope_mergeable_loadok = 0;
     scope_repeat = 0;
     scope_repeat_foreign = 0;
+    scope_merged = 0;
     scope_report_frames = 0;
   }
 #endif
@@ -176,6 +314,30 @@ void VKCommandBuilder::groups_extract_barriers(VKRenderGraph &render_graph,
                                                Span<NodeHandle> node_handles,
                                                bool use_local_read)
 {
+  scope_merge_skip_.clear();
+  scope_merge_dropped_.clear();
+  scope_merges_.clear();
+
+  /* The pass below runs with the marked scope joins applied, so the groups it walks and the
+   * barriers it produces are the ones the recording sees. A join is only kept when it leaves
+   * nothing to be recorded between the two nodes: a group barrier sitting there would be
+   * recorded inside the still open scope. Dropping a join changes the tracked state, so the pass
+   * is re-run from a snapshot. The loop ends by itself: every re-run keeps all remaining joins or
+   * drops at least one of the candidates, and there is a finite number of those. */
+  resource_states_before_extraction_ = render_graph.resources_.resources_;
+  extract_barriers_pass(render_graph, node_handles, use_local_read);
+  while (drop_unsafe_scope_merges()) {
+    render_graph.resources_.resources_ = resource_states_before_extraction_;
+    extract_barriers_pass(render_graph, node_handles, use_local_read);
+  }
+
+  apply_scope_merge_store_patches(render_graph);
+}
+
+void VKCommandBuilder::extract_barriers_pass(VKRenderGraph &render_graph,
+                                             Span<NodeHandle> node_handles,
+                                             bool use_local_read)
+{
   barrier_list_.clear();
   vk_buffer_memory_barriers_.clear();
   vk_image_memory_barriers_.clear();
@@ -205,6 +367,10 @@ void VKCommandBuilder::groups_extract_barriers(VKRenderGraph &render_graph,
     for (const int64_t group_node_index : node_group) {
       NodeHandle node_handle = node_handles[group_node_index];
       VKRenderGraphNode &node = render_graph.nodes_[node_handle];
+      if (scope_merge_skipped(node_handle)) {
+        /* Joined scope: neither this node's barriers nor its scope bookkeeping apply. */
+        continue;
+      }
       Barrier barrier = {};
       build_pipeline_barriers(
           render_graph, node_handle, node.pipeline_stage_get(), image_tracker, barrier);
@@ -244,6 +410,12 @@ void VKCommandBuilder::groups_extract_barriers(VKRenderGraph &render_graph,
         image_tracker.begin(render_graph, node_handle);
       }
 
+      else if (node.type == VKNodeType::END_RENDERING && rendering_active &&
+               try_scope_merge(
+                   render_graph, node_handles, group_node_index, group_index, rendering_scope))
+      {
+        /* Joined with the following scope: kept open on purpose, so the close is skipped. */
+      }
       else if (node.type == VKNodeType::END_RENDERING) {
         /* End rendering scope. */
         BLI_assert(rendering_active);
@@ -352,7 +524,7 @@ void VKCommandBuilder::groups_extract_barriers(VKRenderGraph &render_graph,
         }
       }
     }
-    if (rendering_active) {
+    if (rendering_active && !scope_merge_skipped(node_handles[node_group.last()])) {
       /* Suspend layered image tracker. When active the next group will always be a compute/data
        * transfer group.
        *
@@ -475,6 +647,92 @@ void VKCommandBuilder::groups_extract_barriers(VKRenderGraph &render_graph,
   BLI_assert(group_post_barriers_.size() == group_nodes_.size());
 }
 
+bool VKCommandBuilder::try_scope_merge(VKRenderGraph &render_graph,
+                                       Span<NodeHandle> node_handles,
+                                       int64_t group_node_index,
+                                       int64_t group_index,
+                                       NodeHandle owner_begin)
+{
+#ifdef __ANDROID__
+  /* Joining changes the recorded command stream, so the switch allows a like-for-like fps
+   * comparison without a rebuild: `setprop debug.blender.scopemerge 0` and restart. */
+  static const bool scope_merge_enabled = []() {
+    char value[PROP_VALUE_MAX] = {};
+    const int len = __system_property_get("debug.blender.scopemerge", value);
+    return !(len > 0 && atoi(value) == 0);
+  }();
+  if (!scope_merge_enabled) {
+    return false;
+  }
+#endif
+
+  if (owner_begin == 0) {
+    return false;
+  }
+  const int64_t begin_index = group_node_index + 1;
+  if (begin_index >= int64_t(node_handles.size())) {
+    return false;
+  }
+  const NodeHandle end_rendering = node_handles[group_node_index];
+  const NodeHandle begin_rendering = node_handles[begin_index];
+  if (render_graph.nodes_[begin_rendering].type != VKNodeType::BEGIN_RENDERING) {
+    return false;
+  }
+  if (scope_merge_dropped_.contains(end_rendering)) {
+    return false;
+  }
+  if (!scope_begins_match(render_graph, owner_begin, begin_rendering)) {
+    return false;
+  }
+  if (scope_begin_clears(render_graph.storage_.begin_rendering[render_graph.nodes_[begin_rendering]
+                                                                    .storage_index]))
+  {
+    return false;
+  }
+
+  /* Nothing is recorded between the two nodes, so dropping the pair does not reorder any command:
+   * the second draw run simply keeps the scope open. */
+  scope_merge_skip_.add(end_rendering);
+  scope_merge_skip_.add(begin_rendering);
+  scope_merges_.append(
+      ScopeMerge{end_rendering, begin_rendering, owner_begin, group_index});
+  return true;
+}
+
+bool VKCommandBuilder::drop_unsafe_scope_merges()
+{
+  bool dropped = false;
+  for (int64_t i = int64_t(scope_merges_.size()) - 1; i >= 0; i--) {
+    const ScopeMerge &merge = scope_merges_[i];
+    /* A barrier recorded between the END and the BEGIN would end up inside the open scope, and
+     * the recording asserts against that. Leave that pair to the normal close and begin. */
+    const bool clean_boundary = group_pre_barriers_[merge.group_index + 1].is_empty() &&
+                                group_post_barriers_[merge.group_index].is_empty();
+    if (clean_boundary) {
+      continue;
+    }
+    scope_merge_skip_.remove(merge.end_rendering);
+    scope_merge_skip_.remove(merge.begin_rendering);
+    scope_merge_dropped_.add(merge.end_rendering);
+    scope_merges_.remove_and_reorder(i);
+    dropped = true;
+  }
+  return dropped;
+}
+
+void VKCommandBuilder::apply_scope_merge_store_patches(VKRenderGraph &render_graph)
+{
+  for (const ScopeMerge &merge : scope_merges_) {
+    VKBeginRenderingData &owner_data =
+        render_graph.storage_.begin_rendering[render_graph.nodes_[merge.owner_begin]
+                                                  .storage_index];
+    const VKBeginRenderingData &next_data =
+        render_graph.storage_.begin_rendering[render_graph.nodes_[merge.begin_rendering]
+                                                  .storage_index];
+    scope_begin_join_stores(owner_data, next_data);
+  }
+}
+
 void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
                                              VKCommandBufferInterface &command_buffer,
                                              Span<NodeHandle> node_handles)
@@ -506,6 +764,15 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
     /* Record group node commands. */
     for (NodeHandle node_handle : group_node_handles) {
       VKRenderGraphNode &node = render_graph.nodes_[node_handle];
+
+      if (scope_merge_skipped(node_handle)) {
+        /* Joined scope: the close or the begin node is dropped. A dropped close means the scope
+         * stays open through this group. */
+        if (node.type == VKNodeType::END_RENDERING) {
+          scope_merged++;
+        }
+        continue;
+      }
 
       if (G.debug & G_DEBUG_GPU) {
         activate_debug_group(render_graph, command_buffer, debug_groups, node_handle);
@@ -572,38 +839,7 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
             if (directly_adjacent) {
               scope_adjacent++;
             }
-            const Span<VKRenderGraphImage> previous =
-                render_graph.linked_images(render_graph.nodes_[rendering_scope]);
-            const Span<VKRenderGraphImage> current = render_graph.linked_images(node);
-            bool same_attachments = previous.size() == current.size();
-            for (const VKRenderGraphImage &current_link : current) {
-              if (!same_attachments) {
-                break;
-              }
-              bool found = false;
-              for (const VKRenderGraphImage &previous_link : previous) {
-                if (previous_link.resource.handle == current_link.resource.handle &&
-                    previous_link.vk_image_aspect == current_link.vk_image_aspect)
-                {
-                  found = true;
-                  break;
-                }
-              }
-              same_attachments = found;
-            }
-            if (same_attachments) {
-              /* The render area has to match as well: merging different rects would also merge
-               * their scissors and clear rects. */
-              const VKBeginRenderingData &previous_begin =
-                  render_graph.storage_.begin_rendering[render_graph.nodes_[rendering_scope]
-                                                             .storage_index];
-              const VkRect2D &previous_area = previous_begin.vk_rendering_info.renderArea;
-              same_attachments = previous_area.offset.x == area.offset.x &&
-                                 previous_area.offset.y == area.offset.y &&
-                                 previous_area.extent.width == area.extent.width &&
-                                 previous_area.extent.height == area.extent.height;
-            }
-            if (same_attachments) {
+            if (scope_begins_match(render_graph, rendering_scope, node_handle)) {
               scope_repeat++;
               if (!directly_adjacent) {
                 scope_repeat_foreign++;
@@ -668,7 +904,7 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
       node.build_commands(command_buffer, render_graph.storage_, active_pipelines);
     }
 
-    if (rendering_active) {
+    if (rendering_active && !scope_merge_skipped(group_node_handles.last())) {
       /* Suspend rendering as the next node group will contain data transfer/dispatch commands.
        */
       rendering_active = false;
