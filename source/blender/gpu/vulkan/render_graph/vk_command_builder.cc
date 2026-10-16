@@ -51,155 +51,6 @@ void VKCommandBuilder::build_nodes(VKRenderGraph &render_graph,
       render_graph, node_handles, command_buffer.use_dynamic_rendering_local_read);
 }
 
-bool VKCommandBuilder::group_touches_open_scope(const VKRenderGraph &render_graph,
-                                               NodeHandle rendering_scope,
-                                               IndexRange next_group,
-                                               Span<NodeHandle> node_handles,
-                                               int64_t group_index) const
-{
-  /* Both sides are ResourceWithStamp, which is what VKResourceAccessInfo::build_links() produces
-   * from the declared images. The BEGIN_RENDERING node registers its attachments the same way any
-   * other node registers resources, so the scope's own links are the attachment list -- no mapping
-   * back from VkImageView, which is not recoverable here because build_links() drops the VkImage
-   * and the CreateInfo is not retained. */
-  const Span<VKRenderGraphImage> scope_links =
-      render_graph.linked_images(render_graph.nodes_[rendering_scope]);
-  if (scope_links.is_empty()) {
-    /* Nothing recorded for the attachments means no basis for holding the pass open. */
-    log_fusion("reject", group_index, next_group, node_handles, scope_links,
-               0, render_graph, "scope has no image links");
-    return true;
-  }
-
-  /* Compare the handle, never the stamp. build_links() calls get_image_and_increase_stamp() for
-   writes, so a group that writes an attachment comes back with a bumped stamp and would compare
-   unequal -- the scope would then be held open across a write to its own attachment, precisely the
-   case that has to close. The stamp tracks version; the handle identifies the image. */
-  for (const int64_t group_node_index : next_group) {
-    for (const VKRenderGraphImage &node_link :
-         render_graph.linked_images(node_handles[group_node_index]))
-    {
-      /* A transfer layout is a layout transition by definition, and a transition is not legal
-       * while the pass is open. Checked on the node's declared layout rather than on the barrier
-       * list: the group's pre barriers are emitted at the top of the group's own iteration, which
-       * is before this decision is reached, so by here they have already been recorded. Reading
-       * the intent the node declares does not depend on emission order.
-       *
-       * GENERAL and SHADER_READ_ONLY are not rejected: they may already be the image's layout, and
-       * the render graph transitions only when it has to. TRANSFER_SRC and TRANSFER_DST always do.
-       * Measured: group 26 fuses a single COPY_IMAGE declaring handle 1 at layout 7
-       * (TRANSFER_DST_OPTIMAL), which is exactly this case. */
-      if (node_link.vk_image_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL ||
-          node_link.vk_image_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
-      {
-        log_fusion("reject-transfer", group_index, next_group, node_handles, scope_links, 0,
-                   render_graph, "group needs a transfer layout transition");
-        return true;
-      }
-      for (const VKRenderGraphImage &scope_link : scope_links) {
-        if (node_link.resource.handle == scope_link.resource.handle) {
-          log_fusion("reject-touch", group_index, next_group, node_handles, scope_links, 0,
-                     render_graph, "group links an attachment");
-          return true;
-        }
-      }
-    }
-  }
-
-  /* Barriers issued at this boundary come from the group that is ending, not from the next one, so
-   * they need checking separately. The barrier generator assumes a render scope is closed at every
-   * group boundary: holding the pass open lets a barrier transition the layout of an image that is
-   * an attachment of the still-open scope, which is not a legal command sequence. That is what
-   * killed the process on the first frame -- the commands are ours, and the undefined behaviour
-   * they provoke is not the driver's fault.
-   *
-   * So this is not only a missing check, which is the part worth being honest about: the barrier
-   * generator would have to know the pass is open, otherwise every barrier it emits across a
-   * held-open boundary is computed against the wrong assumption. Closing whenever the ending group
-   * carries image barriers is the conservative approximation of that, and it may fire often enough
-   * to leave little on the table. Worth measuring before investing in the general form. */
-  const Span<VkImageMemoryBarrier> post_image_barriers =
-      vk_image_memory_barriers_.as_span().slice(group_post_barriers_[group_index]);
-  if (!post_image_barriers.is_empty()) {
-    log_fusion("reject-barrier", group_index, next_group, node_handles, scope_links,
-               int(post_image_barriers.size()), render_graph,
-               "ending group carries image barriers");
-    return true;
-  }
-  log_fusion("FUSE", group_index, next_group, node_handles, scope_links,
-               0, render_graph, "holding the pass open");
-  return false;
-}
-
-#ifdef __ANDROID__
-/**
- * Trace the fusion decision. This exists because the crash has no usable backtrace -- it lands in
- * vulkan.mtk.so with only driver frames -- so the only way to find out what the command stream
- * contained is to say what was about to be recorded. Prints the decision, the node types in the
- * group about to run, the attachment handles, and how many image links were compared.
- */
-void VKCommandBuilder::log_fusion(const char *decision,
-                                  int64_t group_index,
-                                  IndexRange next_group,
-                                  Span<NodeHandle> node_handles,
-                                  Span<VKRenderGraphImage> scope_links,
-                                  int post_image_barriers,
-                                  const VKRenderGraph &render_graph,
-                                  const char *why) const
-{
-  static const bool log_enabled = []() {
-    char value[PROP_VALUE_MAX] = {};
-    return __system_property_get("debug.blender.perf", value) > 0 && atoi(value) != 0;
-  }();
-  if (!log_enabled) {
-    return;
-  }
-
-  std::stringstream ss;
-  ss << "fusion " << decision << " why=" << why << " group=" << group_index
-     << " nodes=" << next_group.size() << " types=";
-  for (const int64_t i : next_group) {
-    ss << int(render_graph.nodes_[node_handles[i]].type) << ",";
-  }
-  ss << " attach=" << scope_links.size();
-  for (const VKRenderGraphImage &link : scope_links) {
-    ss << "/" << uint64_t(link.resource.handle) << ":" << int(link.vk_access_flags);
-  }
-  ss << " postBarriers=" << post_image_barriers;
-  /* What the group about to run actually declares, with the layout it asks for. The layout is the
-   * field that decides legality inside an open render pass, and it is not visible from the node type
-   * or from the attachment list alone -- a link can carry the same handle and still request
-   * TRANSFER_DST_OPTIMAL, which is a layout transition and is not allowed while the image is an
-   * attachment. Without this, a group that copies to the attachment is indistinguishable from one
-   * that copies somewhere else. */
-  ss << " grouplinks=";
-  for (const int64_t i : next_group) {
-    for (const VKRenderGraphImage &link :
-         render_graph.linked_images(node_handles[i]))
-    {
-      ss << uint64_t(link.resource.handle) << "@" << int(link.vk_image_layout) << ":"
-         << int(link.vk_access_flags) << " ";
-    }
-  }
-  __android_log_print(ANDROID_LOG_WARN, "blender-fusion", "%s", ss.str().c_str());
-}
-#endif
-
-bool VKCommandBuilder::hold_pass_fusion_enabled()
-{
-#ifdef __ANDROID__
-  /* Opt-in, see the declaration: this crashes on the first frame and nothing tried has narrowed
-   * it down, so it stays off unless someone deliberately asks for it. */
-  static const bool enabled = []() {
-    char value[PROP_VALUE_MAX] = {};
-    return __system_property_get("debug.blender.passfusion", value) > 0 && atoi(value) != 0;
-  }();
-  return enabled;
-#else
-  return false;
-#endif
-}
-
 #ifdef __ANDROID__
 void VKCommandBuilder::scope_detail(const VKBeginRenderingData &begin_data) const
 {
@@ -266,7 +117,8 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
       __android_log_print(ANDROID_LOG_WARN,
                           "blender-scope",
                           "scopes/frame=%u pixels/frame=%llu MPix/scope=%llu "
-                          "loadOp: clear=%u load=%u dontcare=%u  fused=%u  fallback=%d",
+                          "loadOp: clear=%u load=%u dontcare=%u  fallback=%d  "
+                          "adjacent=%u mergeable=%u loadok=%u",
                           uint32_t(scope_count / scope_report_frames),
                           (unsigned long long)(scope_pixels / scope_report_frames),
                           scope_count ?
@@ -275,15 +127,19 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                           uint32_t(scope_load_clear / scope_report_frames),
                           uint32_t(scope_load_keep / scope_report_frames),
                           uint32_t(scope_load_none / scope_report_frames),
-                          uint32_t(scope_fused / scope_report_frames),
-                          int(VKRenderPassFallback::is_active()));
+                          int(VKRenderPassFallback::is_active()),
+                          uint32_t(scope_adjacent / scope_report_frames),
+                          uint32_t(scope_mergeable / scope_report_frames),
+                          uint32_t(scope_mergeable_loadok / scope_report_frames));
     }
     scope_pixels = 0;
     scope_count = 0;
     scope_load_clear = 0;
     scope_load_keep = 0;
     scope_load_none = 0;
-    scope_fused = 0;
+    scope_adjacent = 0;
+    scope_mergeable = 0;
+    scope_mergeable_loadok = 0;
     scope_report_frames = 0;
   }
 #endif
@@ -684,6 +540,54 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
             }
           }
           scope_detail(begin_data);
+          /* Measurement only: a scope that begins immediately after another one ends, targeting
+           * the same attachments, is the candidate for being merged into a single scope. That is a
+           * legal change -- two scopes dropped into one -- unlike holding one scope open across
+           * transfer or dispatch work, which is not a legal command stream: vkCmdCopyBuffer must
+           * only be called outside a render pass instance (VUID-vkCmdCopyBuffer-renderpass), and
+           * the same holds for dispatch. Counted before anything is built on it. The previous
+           * scope's begin node is still in rendering_scope here; nothing else has overwritten it
+           * since its END_RENDERING ran. */
+          const int64_t flat_index = group_nodes.first();
+          if (rendering_scope != 0 && flat_index > 0 &&
+              render_graph.nodes_[node_handles[flat_index - 1]].type == VKNodeType::END_RENDERING)
+          {
+            scope_adjacent++;
+            const Span<VKRenderGraphImage> previous =
+                render_graph.linked_images(render_graph.nodes_[rendering_scope]);
+            const Span<VKRenderGraphImage> current = render_graph.linked_images(node);
+            bool same_attachments = previous.size() == current.size();
+            for (const VKRenderGraphImage &current_link : current) {
+              if (!same_attachments) {
+                break;
+              }
+              bool found = false;
+              for (const VKRenderGraphImage &previous_link : previous) {
+                if (previous_link.resource.handle == current_link.resource.handle &&
+                    previous_link.vk_image_aspect == current_link.vk_image_aspect)
+                {
+                  found = true;
+                  break;
+                }
+              }
+              same_attachments = found;
+            }
+            if (same_attachments) {
+              scope_mergeable++;
+              /* A clear on the second scope means its contents do not survive the boundary, so
+               * merging would have to keep the clear; counted apart from the plain cases. */
+              bool keeps_contents = true;
+              for (uint32_t i = 0; i < color_count; i++) {
+                if (begin_data.color_attachments[i].loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) {
+                  keeps_contents = false;
+                  break;
+                }
+              }
+              if (keeps_contents) {
+                scope_mergeable_loadok++;
+              }
+            }
+          }
         }
         rendering_scope = node_handle;
         rendering_active = true;
@@ -727,27 +631,7 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
       node.build_commands(command_buffer, render_graph.storage_, active_pipelines);
     }
 
-    if (rendering_active && hold_pass_fusion_enabled() &&
-        !group_touches_open_scope(render_graph, rendering_scope, group_nodes, node_handles, group_index))
-    {
-      /* The next group does not read or write any attachment of the open scope, so nothing forces
-       * the tile to flush and the render pass can stay open across the boundary. Closed later by
-       * the END_RENDERING node or by a group that does touch an attachment.
-       *
-       * Conservative by construction: a node declares the image in its links whether it is a
-       * transfer, a compute write, a sampled read or an input attachment, so only groups provably
-       * unrelated to the attachments stay open. The alternative -- closing on every boundary -- is
-       * what this path did, and it cost a tile flush per boundary: measured on the Moto, 29.8% of
-       * scopes repeat the previous one and they carry 31.3% of the pixel traffic.
-       *
-       * Falls through rather than continuing the loop. The group's post barriers still have to be
-       * issued: skipping them with a continue dropped synchronization the render graph had
-       * generated, and the driver was handed a command stream it had no contract for -- that is
-       * what killed the process, not the pass being open. Whether those barriers are *correct*
-       * with the pass held open is a separate question this does not answer. */
-      scope_fused++;
-    }
-    else if (rendering_active) {
+    if (rendering_active) {
       /* Suspend rendering as the next node group will contain data transfer/dispatch commands.
        */
       rendering_active = false;

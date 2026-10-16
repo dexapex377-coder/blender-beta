@@ -60,56 +60,13 @@ class VKCommandBuilder {
   uint32_t scope_load_none = 0;
   /** Frames since the last report; the totals are averaged over this many. */
   uint32_t scope_report_frames = 0;
-  /** Group boundaries where the render pass stayed open. Reported so the effect is measurable. */
-  uint32_t scope_fused = 0;
+  /** Adjacent scopes measured while looking into where the tile flushes can legally be cut. */
+  uint32_t scope_adjacent = 0;
+  uint32_t scope_mergeable = 0;
+  uint32_t scope_mergeable_loadok = 0;
 
   /** Android only. One line per scope, behind the android.perf switch. */
   void scope_detail(const VKBeginRenderingData &begin_data) const;
-
-  /**
-   * Hold a render pass open across a node group boundary instead of closing and reopening it.
-   *
-   * Off by default, and reachable at runtime through debug.blender.passfusion.
-   *
-   * The motivation was real and measured: on a tile-based GPU each close is a tile flush, and on
-   * the Moto 29.8% of render scopes repeat the previous one while carrying 31.3% of the per-frame
-   * pixel traffic. The implementation, though, does not work. Holding the pass open crashes the
-   * process on the first frame at a fixed address inside vulkan.mtk.so, and the signature is
-   * unchanged by every boundary condition tried: comparing resource handles rather than stamps,
-   * refusing to hold the pass when the ending group carries image barriers, and issuing the group
-   * post barriers instead of skipping them with a continue. A guard that provably excludes the
-   * cases should have removed the crash and did not, which means the thing touching the
-   * attachment has not been identified -- and an optimisation whose safety condition is not
-   * understood is not worth shipping, let alone shipping on.
-   *
-   * Left in place, defaulted off, so the reasoning survives for whoever picks it up: making this
-   * correct means the barrier generator has to know the pass is open, because it currently
-   * assumes a scope closes at every group boundary and therefore computes every cross-boundary
-   * barrier against a false assumption. That is a change to barrier generation, and it should
-   * start by working out what is actually touching the attachment.
-   */
-  static bool hold_pass_fusion_enabled();
-
-  /** Android only. Traces the pass fusion decision; see the .cc for why. */
-  void log_fusion(const char *decision,
-                  int64_t group_index,
-                  IndexRange next_group,
-                  Span<NodeHandle> node_handles,
-                  Span<VKRenderGraphImage> scope_links,
-                  int post_image_barriers,
-                  const VKRenderGraph &render_graph,
-                  const char *why) const;
-
-  /**
-   * Whether any node in `next_group` reads or writes an image that is an attachment of the open
-   * render scope. Conservative: true whenever there is not a positive proof of independence, so a
-   * false result means the group provably touches none of the attachments.
-   */
-  bool group_touches_open_scope(const VKRenderGraph &render_graph,
-                                NodeHandle rendering_scope,
-                                IndexRange next_group,
-                                Span<NodeHandle> node_handles,
-                                int64_t group_index) const;
 
   struct Barrier {
     /** Index range into `VKCommandBuilder::vk_buffer_memory_barriers_` */
