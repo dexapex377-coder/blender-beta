@@ -354,6 +354,13 @@ struct VKCmdCounters {
 /** Returns the counters accumulated so far and resets them. */
 VKCmdCounters vk_cmd_counters_take();
 
+/**
+ * Number of clears that were folded into their render scope's load operations (no clear node was
+ * recorded for them). Counted at graph record time, taken and reset by the reporting window.
+ */
+void vk_fast_clear_count_incr();
+uint64_t vk_fast_clear_count_take();
+
 }  // namespace gpu::render_graph
 
 }  // namespace blender

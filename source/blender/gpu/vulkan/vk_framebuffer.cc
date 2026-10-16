@@ -13,6 +13,8 @@
 #include "vk_state_manager.hh"
 #include "vk_texture.hh"
 
+#include "render_graph/vk_command_buffer_wrapper.hh"
+
 namespace blender::gpu {
 
 /**
@@ -22,6 +24,53 @@ constexpr GPULoadStore default_load_store()
 {
   return {GPU_LOADACTION_LOAD, GPU_STOREACTION_STORE, {0.0f, 0.0f, 0.0f, 0.0f}};
 }
+
+#ifdef __ANDROID__
+/* Clears travel as the render scope's load operations instead of a clear node after a load: on a
+ * tile-based GPU that skips reading the previous contents of the attachment from memory only for
+ * the clear command to overwrite them. `setprop debug.blender.fastclear 0` records the clears the
+ * old way, without a rebuild. */
+static bool fast_clear_enabled()
+{
+  static const bool enabled = []() {
+    char value[PROP_VALUE_MAX] = {};
+    const int len = __system_property_get("debug.blender.fastclear", value);
+    return !(len > 0 && atoi(value) == 0);
+  }();
+  return enabled;
+}
+
+/* The load store carries one clear value shared by the depth and the stencil aspect of the same
+ * attachment, so both aspects are always cleared together. A stencil aspect this clear does not
+ * cover (asking for depth only) is the one case that would change, and it keeps its own path. */
+static bool load_store_can_clear_depth(const GPUAttachment &attachment,
+                                       const GPUFrameBufferBits buffers)
+{
+  VKTexture *texture = unwrap(unwrap(attachment.tex));
+  if (texture == nullptr || !(buffers & GPU_DEPTH_BIT)) {
+    return false;
+  }
+  const bool stencil_aspect = (to_vk_image_aspect_flag_bits(texture->device_format_get()) &
+                               VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
+  return !stencil_aspect || (buffers & GPU_STENCIL_BIT);
+}
+
+/* A texture level depth clear writes the whole texture, while the load operation only covers the
+ * scope's render area: only equivalent when the render area is the whole (mip 0, single layer)
+ * attachment. */
+static bool load_store_covers_attachment(const int2 size, const GPUAttachment &attachment)
+{
+  VKTexture *texture = unwrap(unwrap(attachment.tex));
+  if (texture == nullptr || attachment.mip != 0 || texture->mip_count() != 1 ||
+      texture->layer_count() != 1)
+  {
+    return false;
+  }
+  int mip_size[3];
+  GPU_texture_get_mipmap_size(attachment.tex, 0, mip_size);
+  return size.x == mip_size[0] && size.y == mip_size[1];
+}
+#endif
 
 /* -------------------------------------------------------------------- */
 /** \name Creation & Deletion
@@ -186,13 +235,18 @@ void VKFrameBuffer::clear(const GPUFrameBufferBits buffers,
                           float clear_depth,
                           uint clear_stencil)
 {
+#ifdef __ANDROID__
+  const bool fast_clear = fast_clear_enabled() && !is_rendering_;
+#endif
+
+  VKContext &context = *VKContext::get();
   render_graph::VKClearAttachmentsNode::CreateInfo clear_attachments = {};
   render_area_update(clear_attachments.vk_clear_rect.rect);
   clear_attachments.vk_clear_rect.baseArrayLayer = 0;
   clear_attachments.vk_clear_rect.layerCount = 1;
+  bool load_store_clears = false;
 
   if (buffers & (GPU_DEPTH_BIT | GPU_STENCIL_BIT)) {
-    VKContext &context = *VKContext::get();
     GPUWriteMask needed_mask = GPU_WRITE_NONE;
     if (buffers & GPU_DEPTH_BIT) {
       needed_mask |= GPU_WRITE_DEPTH;
@@ -206,29 +260,80 @@ void VKFrameBuffer::clear(const GPUFrameBufferBits buffers,
     /* WORKAROUND: Clearing depth attachment when using dynamic rendering are not working on AMD
      * official drivers.
      * See #129265 */
-    if ((context.state_manager_get().state.write_mask & needed_mask) == needed_mask &&
-        !GPU_type_matches(GPU_DEVICE_ATI, GPU_OS_ANY, GPU_DRIVER_OFFICIAL))
-    {
+    const bool via_clear_attachments =
+        (context.state_manager_get().state.write_mask & needed_mask) == needed_mask &&
+        !GPU_type_matches(GPU_DEVICE_ATI, GPU_OS_ANY, GPU_DRIVER_OFFICIAL);
+    const GPUAttachment &attachment = depth_attachment();
+    VKTexture *depth_texture = unwrap(unwrap(attachment.tex));
+
+    bool load_store_depth = false;
+#ifdef __ANDROID__
+    if (fast_clear) {
+      if (via_clear_attachments) {
+        /* The clear node rect is the scope's render area: the same pixels either way. */
+        load_store_depth = load_store_can_clear_depth(attachment, buffers);
+      }
+      else {
+        /* The texture level clear covers the whole texture, the load operation only the render
+         * area. */
+        load_store_depth = load_store_can_clear_depth(attachment, buffers) &&
+                           load_store_covers_attachment(size_get(), attachment);
+      }
+    }
+#endif
+
+    if (load_store_depth) {
+      /* The second component of the clear value is the stencil value, see #set_load_store. */
+      const int depth_slot = attachments_[GPU_FB_DEPTH_ATTACHMENT].tex != nullptr ?
+                                 GPU_FB_DEPTH_ATTACHMENT :
+                                 GPU_FB_DEPTH_STENCIL_ATTACHMENT;
+      load_stores[depth_slot] = {GPU_LOADACTION_CLEAR,
+                                 GPU_STOREACTION_STORE,
+                                 {double(clear_depth), double(clear_stencil), 0.0, 0.0}};
+      load_store_clears = true;
+    }
+    else if (via_clear_attachments) {
       build_clear_attachments_depth_stencil(
           buffers, clear_depth, clear_stencil, clear_attachments);
     }
-    else {
-      const GPUAttachment &attachment = depth_attachment();
-      VKTexture *depth_texture = unwrap(unwrap(attachment.tex));
-      if (depth_texture != nullptr) {
-        depth_texture->clear_depth_stencil(
-            buffers,
-            clear_depth,
-            clear_stencil,
-            attachment.layer == -1 ? std::nullopt : std::make_optional(attachment.layer));
-      }
+    else if (depth_texture != nullptr) {
+      depth_texture->clear_depth_stencil(
+          buffers,
+          clear_depth,
+          clear_stencil,
+          attachment.layer == -1 ? std::nullopt : std::make_optional(attachment.layer));
     }
   }
   if (buffers & GPU_COLOR_BIT) {
-    double4 clear_color_single = double4(clear_color);
-    build_clear_attachments_color({&clear_color_single, 1}, false, clear_attachments);
+    bool colors_handled = false;
+#ifdef __ANDROID__
+    if (fast_clear) {
+      for (int color_slot = 0; color_slot < GPU_FB_MAX_COLOR_ATTACHMENT; color_slot++) {
+        const GPUAttachmentType type = GPU_FB_COLOR_ATTACHMENT0 + color_slot;
+        if (attachments_[type].tex == nullptr) {
+          continue;
+        }
+        /* Same clear value as #build_clear_attachments_color records. */
+        load_stores[type] = {GPU_LOADACTION_CLEAR, GPU_STOREACTION_STORE, {UNPACK4(clear_color)}};
+        load_store_clears = true;
+      }
+      colors_handled = true;
+    }
+#endif
+    if (!colors_handled) {
+      double4 clear_color_single = double4(clear_color);
+      build_clear_attachments_color({&clear_color_single, 1}, false, clear_attachments);
+    }
   }
 
+  if (load_store_clears) {
+#ifdef __ANDROID__
+    render_graph::vk_fast_clear_count_incr();
+#endif
+    /* Begin the scope with the clears as load operations; the begin consumes and resets the
+     * armed load stores. */
+    rendering_ensure(context);
+  }
   if (clear_attachments.attachment_count) {
     clear(clear_attachments);
   }
@@ -236,12 +341,42 @@ void VKFrameBuffer::clear(const GPUFrameBufferBits buffers,
 
 void VKFrameBuffer::clear_multi(Span<double4> clear_cols)
 {
+#ifdef __ANDROID__
+  const bool fast_clear = fast_clear_enabled() && !is_rendering_;
+#endif
+
   render_graph::VKClearAttachmentsNode::CreateInfo clear_attachments = {};
   render_area_update(clear_attachments.vk_clear_rect.rect);
   clear_attachments.vk_clear_rect.baseArrayLayer = 0;
   clear_attachments.vk_clear_rect.layerCount = 1;
+  bool load_store_clears = false;
 
-  build_clear_attachments_color(clear_cols, true, clear_attachments);
+#ifdef __ANDROID__
+  if (fast_clear) {
+    int color_index = 0;
+    for (int color_slot = 0; color_slot < GPU_FB_MAX_COLOR_ATTACHMENT; color_slot++) {
+      const GPUAttachmentType type = GPU_FB_COLOR_ATTACHMENT0 + color_slot;
+      if (attachments_[type].tex == nullptr) {
+        continue;
+      }
+      load_stores[type] = {GPU_LOADACTION_CLEAR,
+                           GPU_STOREACTION_STORE,
+                           {UNPACK4(clear_cols[color_index])}};
+      color_index++;
+      load_store_clears = true;
+    }
+  }
+#endif
+
+  if (!load_store_clears) {
+    build_clear_attachments_color(clear_cols, true, clear_attachments);
+  }
+  else {
+#ifdef __ANDROID__
+    render_graph::vk_fast_clear_count_incr();
+#endif
+    rendering_ensure(*VKContext::get());
+  }
   if (clear_attachments.attachment_count) {
     clear(clear_attachments);
   }
@@ -745,7 +880,15 @@ void VKFrameBuffer::rendering_ensure_dynamic_rendering(VKContext &context)
       attachment_info.imageView = depth_image_view;
       attachment_info.imageLayout = vk_image_layout;
 
-      set_load_store(attachment_info, GPU_DATA_UINT, load_stores[depth_attachment_index]);
+      /* The load store carries the depth value in the first component of its clear value and the
+       * stencil value in the second. Converting through a color union would write into the depth
+       * field, so both fields are written directly. */
+      const GPULoadStore &load_store = load_stores[depth_attachment_index];
+      attachment_info.loadOp = to_vk_attachment_load_op(load_store.load_action);
+      attachment_info.storeOp = to_vk_attachment_store_op(load_store.store_action);
+      attachment_info.clearValue.depthStencil.depth = float(load_store.clear_value[0]);
+      attachment_info.clearValue.depthStencil.stencil = uint32_t(load_store.clear_value[1]);
+
       stencil_attachment_format_ = vk_format;
       begin_rendering.node_data.vk_rendering_info.pStencilAttachment =
           &begin_rendering.node_data.stencil_attachment;

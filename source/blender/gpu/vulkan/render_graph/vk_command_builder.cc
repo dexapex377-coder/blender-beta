@@ -515,13 +515,14 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
     }();
     /* Always taken so the window resets with the scope totals whether or not it is printed. */
     const VKCmdCounters cmds = vk_cmd_counters_take();
+    const uint64_t fast_clears = vk_fast_clear_count_take();
     if (log_enabled) {
       __android_log_print(ANDROID_LOG_WARN,
                           "blender-scope",
                           "scopes/frame=%u pixels/frame=%llu MPix/scope=%llu "
                           "loadOp: clear=%u load=%u dontcare=%u  fallback=%d  "
                           "adjacent=%u mergeable=%u loadok=%u repeat=%u repeatsep=%u merged=%u "
-                          "elided=%u",
+                          "elided=%u fastclear=%u",
                           uint32_t(scope_count / scope_report_frames),
                           (unsigned long long)(scope_pixels / scope_report_frames),
                           scope_count ?
@@ -537,7 +538,8 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                           uint32_t(scope_repeat / scope_report_frames),
                           uint32_t(scope_repeat_foreign / scope_report_frames),
                           uint32_t(scope_merged / scope_report_frames),
-                          uint32_t(scope_elided / scope_report_frames));
+                          uint32_t(scope_elided / scope_report_frames),
+                          uint32_t(fast_clears / scope_report_frames));
       __android_log_print(ANDROID_LOG_WARN,
                           "blender-scope",
                           "cmds/frame: draw=%llu dispatch=%llu barrier=%llu(%llu) pipe=%llu "

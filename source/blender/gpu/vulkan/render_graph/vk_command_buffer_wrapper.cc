@@ -29,6 +29,22 @@ VKCmdCounters vk_cmd_counters_take()
   return result;
 }
 
+/* Incremented while the draw manager records the render graph, taken while the submission thread
+ * records the window report: a torn read would at worst skew one diagnostic number. */
+static uint64_t fast_clear_count = 0;
+
+void vk_fast_clear_count_incr()
+{
+  fast_clear_count++;
+}
+
+uint64_t vk_fast_clear_count_take()
+{
+  const uint64_t result = fast_clear_count;
+  fast_clear_count = 0;
+  return result;
+}
+
 VKCommandBufferWrapper::VKCommandBufferWrapper(VkCommandBuffer vk_command_buffer,
                                                const VolkDeviceTable &functions,
                                                const VKExtensions &extensions,

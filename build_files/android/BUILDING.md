@@ -281,6 +281,10 @@ System properties, read once at startup.
 | Property | Effect |
 | --- | --- |
 | `debug.blender.log` | Per-frame Vulkan submission and draw-lock tracing. Off by default: it costs several logcat lines per frame. |
+| `debug.blender.perf` | Standalone GPU-time and CPU-zone reports (`blender-gputime`, `blender` tags), plus the per-window scope report every 60 frames. |
+| `debug.blender.scopenames` | Names each render scope in the scope report and logs the nodes each scope contains. Costs logcat lines per frame; useful while profiling a capture. |
+| `debug.blender.scopemerge` | Set to `0` to disable render scope merging and scope elision (A/B comparison). |
+| `debug.blender.fastclear` | Set to `0` to record clears as clear commands after a loading scope begin instead of folding them into the begin's load operations. |
 | `debug.blender.turnip` | Load Mesa Turnip instead of the vendor driver. |
 | `debug.blender.lowmem` | Force the low-memory device tier. |
 | `debug.blender.renderdiv` | Render-scale divisor; `2` renders at half resolution. |
