@@ -64,6 +64,10 @@ class VKCommandBuilder {
   uint32_t scope_adjacent = 0;
   uint32_t scope_mergeable = 0;
   uint32_t scope_mergeable_loadok = 0;
+  /** Scopes repeating the attachment set of the previous scope, adjacent or not. The separated
+   * ones are the candidates that need the work in between moved out of the way first. */
+  uint32_t scope_repeat = 0;
+  uint32_t scope_repeat_foreign = 0;
 
   /** Android only. One line per scope, behind the android.perf switch. */
   void scope_detail(const VKBeginRenderingData &begin_data) const;

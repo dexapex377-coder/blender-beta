@@ -118,7 +118,7 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                           "blender-scope",
                           "scopes/frame=%u pixels/frame=%llu MPix/scope=%llu "
                           "loadOp: clear=%u load=%u dontcare=%u  fallback=%d  "
-                          "adjacent=%u mergeable=%u loadok=%u",
+                          "adjacent=%u mergeable=%u loadok=%u repeat=%u repeatsep=%u",
                           uint32_t(scope_count / scope_report_frames),
                           (unsigned long long)(scope_pixels / scope_report_frames),
                           scope_count ?
@@ -130,7 +130,9 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                           int(VKRenderPassFallback::is_active()),
                           uint32_t(scope_adjacent / scope_report_frames),
                           uint32_t(scope_mergeable / scope_report_frames),
-                          uint32_t(scope_mergeable_loadok / scope_report_frames));
+                          uint32_t(scope_mergeable_loadok / scope_report_frames),
+                          uint32_t(scope_repeat / scope_report_frames),
+                          uint32_t(scope_repeat_foreign / scope_report_frames));
     }
     scope_pixels = 0;
     scope_count = 0;
@@ -140,6 +142,8 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
     scope_adjacent = 0;
     scope_mergeable = 0;
     scope_mergeable_loadok = 0;
+    scope_repeat = 0;
+    scope_repeat_foreign = 0;
     scope_report_frames = 0;
   }
 #endif
@@ -523,11 +527,8 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
           const uint32_t color_count = begin_data.vk_rendering_info.colorAttachmentCount;
           scope_pixels += uint64_t(area.extent.width) * uint64_t(area.extent.height) *
                           (color_count + 1);
-          for (uint32_t i = 0; i < color_count; i++) {
-            if (begin_data.color_formats[i] == VK_FORMAT_UNDEFINED) {
-              continue;
-            }
-            switch (begin_data.color_attachments[i].loadOp) {
+          auto count_load_op = [this](VkAttachmentLoadOp load_op) {
+            switch (load_op) {
               case VK_ATTACHMENT_LOAD_OP_CLEAR:
                 scope_load_clear++;
                 break;
@@ -538,21 +539,39 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
                 scope_load_none++;
                 break;
             }
+          };
+          for (uint32_t i = 0; i < color_count; i++) {
+            /* Empty slots carry a DONT_CARE placeholder and a null view. The format array cannot
+             * be the filter here: it is only filled when the render pass fallback is active,
+             * which left this accounting reading all zeros on the native path. */
+            if (begin_data.color_attachments[i].imageView == VK_NULL_HANDLE) {
+              continue;
+            }
+            count_load_op(begin_data.color_attachments[i].loadOp);
+          }
+          if (begin_data.vk_rendering_info.pDepthAttachment != nullptr) {
+            count_load_op(begin_data.depth_attachment.loadOp);
           }
           scope_detail(begin_data);
-          /* Measurement only: a scope that begins immediately after another one ends, targeting
-           * the same attachments, is the candidate for being merged into a single scope. That is a
-           * legal change -- two scopes dropped into one -- unlike holding one scope open across
-           * transfer or dispatch work, which is not a legal command stream: vkCmdCopyBuffer must
+          /* Measurement only. A scope targeting the same attachments as the previous one is a
+           * merge candidate, and there are two kinds of those: adjacent (the END/BEGIN pair is
+           * dropped and both draw runs become one scope) and separated by other work (the
+           * commands in between have to be moved before or after the merged scope first, which is
+           * a scheduler change and not something the builder can do on its own). They are counted
+           * apart for that reason. Neither is the removed fusion, which held a scope open across
+           * transfer or dispatch work; that is not a legal command stream -- vkCmdCopyBuffer must
            * only be called outside a render pass instance (VUID-vkCmdCopyBuffer-renderpass), and
-           * the same holds for dispatch. Counted before anything is built on it. The previous
+           * the same holds for dispatch. Nothing is built on these numbers yet. The previous
            * scope's begin node is still in rendering_scope here; nothing else has overwritten it
            * since its END_RENDERING ran. */
           const int64_t flat_index = group_nodes.first();
-          if (rendering_scope != 0 && flat_index > 0 &&
-              render_graph.nodes_[node_handles[flat_index - 1]].type == VKNodeType::END_RENDERING)
-          {
-            scope_adjacent++;
+          if (rendering_scope != 0) {
+            const bool directly_adjacent =
+                flat_index > 0 && render_graph.nodes_[node_handles[flat_index - 1]].type ==
+                                      VKNodeType::END_RENDERING;
+            if (directly_adjacent) {
+              scope_adjacent++;
+            }
             const Span<VKRenderGraphImage> previous =
                 render_graph.linked_images(render_graph.nodes_[rendering_scope]);
             const Span<VKRenderGraphImage> current = render_graph.linked_images(node);
@@ -573,18 +592,36 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
               same_attachments = found;
             }
             if (same_attachments) {
-              scope_mergeable++;
-              /* A clear on the second scope means its contents do not survive the boundary, so
-               * merging would have to keep the clear; counted apart from the plain cases. */
-              bool keeps_contents = true;
-              for (uint32_t i = 0; i < color_count; i++) {
-                if (begin_data.color_attachments[i].loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) {
-                  keeps_contents = false;
-                  break;
-                }
+              /* The render area has to match as well: merging different rects would also merge
+               * their scissors and clear rects. */
+              const VKBeginRenderingData &previous_begin =
+                  render_graph.storage_.begin_rendering[render_graph.nodes_[rendering_scope]
+                                                             .storage_index];
+              const VkRect2D &previous_area = previous_begin.vk_rendering_info.renderArea;
+              same_attachments = previous_area.offset.x == area.offset.x &&
+                                 previous_area.offset.y == area.offset.y &&
+                                 previous_area.extent.width == area.extent.width &&
+                                 previous_area.extent.height == area.extent.height;
+            }
+            if (same_attachments) {
+              scope_repeat++;
+              if (!directly_adjacent) {
+                scope_repeat_foreign++;
               }
-              if (keeps_contents) {
-                scope_mergeable_loadok++;
+              else {
+                scope_mergeable++;
+                /* A clear on the second scope means its contents do not survive the boundary, so
+                 * merging would have to keep the clear; counted apart from the plain cases. */
+                bool keeps_contents = true;
+                for (uint32_t i = 0; i < color_count; i++) {
+                  if (begin_data.color_attachments[i].loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) {
+                    keeps_contents = false;
+                    break;
+                  }
+                }
+                if (keeps_contents) {
+                  scope_mergeable_loadok++;
+                }
               }
             }
           }
