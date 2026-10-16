@@ -6,11 +6,14 @@
  * \ingroup gpu
  */
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <string>
 #include <thread>
 
 #include "BLI_mutex.hh"
+#include "BLI_perf_probe.hh"
 
 #include "vk_device.hh"
 #include "vk_to_string.hh"
@@ -111,6 +114,7 @@ TimelineValue VKDevice::render_graph_submit(render_graph::VKRenderGraph *render_
   submit_task = nullptr;
 
   if (wait_for_submission) {
+    PERF_ZONE(vk_wait_submit);
     std::unique_lock<Mutex> lock(wait_condition.is_submitted_mutex);
     /* Sliced for the same reason wait_for_timeline() is: an unbounded wait turns a missed
      * wakeup into a process that is frozen rather than broken, and nothing is reported. That
@@ -137,6 +141,7 @@ TimelineValue VKDevice::render_graph_submit(render_graph::VKRenderGraph *render_
   }
 
   if (wait_for_completion) {
+    PERF_ZONE(vk_wait_complete);
     wait_for_timeline(timeline);
   }
   return timeline;
@@ -234,6 +239,75 @@ void VKDevice::submission_runner(VKDevice *device)
   device->functions.vkCreateCommandPool(
       device->vk_device_, &vk_command_pool_create_info, nullptr, &vk_command_pool);
 
+  /* GPU scope timing. The command builder writes one timestamp query pair per render scope, this
+   * thread reads the pairs back once the submission that wrote them has completed and reports the
+   * windowed averages. Android diagnostics, behind the same `debug.blender.perf` switch as the
+   * scope accounting. */
+#ifdef __ANDROID__
+  struct GPUProfileScope {
+    uint64_t tag;
+    uint32_t width;
+    uint32_t height;
+    uint32_t offset_x;
+    uint32_t offset_y;
+    uint64_t count;
+    double sum_ms;
+    double max_ms;
+  };
+  struct GPUProfilePending {
+    uint64_t timeline;
+    Vector<render_graph::VKScopeTimestamp> scopes;
+  };
+  VkQueryPool timestamp_pool = VK_NULL_HANDLE;
+  uint32_t timestamp_pool_size = 0;
+  uint32_t timestamp_cursor = 0;
+  double timestamp_period_ms = 0.0;
+  uint32_t timestamp_valid_bits = 0;
+  bool timestamps_enabled = false;
+  Vector<GPUProfilePending> timestamp_pending;
+  Vector<GPUProfileScope> timestamp_stats;
+  uint64_t timestamp_samples = 0;
+  uint64_t timestamp_submits = 0;
+  double timestamp_submit_sum_ms = 0.0;
+  double timestamp_submit_max_ms = 0.0;
+  {
+    static const bool perf_enabled = []() {
+      char value[PROP_VALUE_MAX] = {};
+      return __system_property_get("debug.blender.perf", value) > 0 && atoi(value) != 0;
+    }();
+    const VkPhysicalDeviceProperties &properties = device->physical_device_properties_get();
+    timestamp_period_ms = double(properties.limits.timestampPeriod) * 1e-6;
+    /* Timestamps are a per queue family capability, not a device limit. */
+    uint32_t queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(
+        device->vk_physical_device_, &queue_family_count, nullptr);
+    if (queue_family_count > 0 && queue_family_count <= 8) {
+      VkQueueFamilyProperties queue_families[8];
+      vkGetPhysicalDeviceQueueFamilyProperties(
+          device->vk_physical_device_, &queue_family_count, queue_families);
+      if (device->vk_queue_family_ < queue_family_count) {
+        timestamp_valid_bits = queue_families[device->vk_queue_family_].timestampValidBits;
+      }
+    }
+    if (perf_enabled && timestamp_valid_bits > 0 && properties.limits.timestampPeriod > 0.0f) {
+      timestamp_pool_size = 2048;
+      VkQueryPoolCreateInfo timestamp_pool_create_info = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+      timestamp_pool_create_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+      timestamp_pool_create_info.queryCount = timestamp_pool_size;
+      const VkResult create_result = device->functions.vkCreateQueryPool(
+          device->vk_device_, &timestamp_pool_create_info, nullptr, &timestamp_pool);
+      timestamps_enabled = create_result == VK_SUCCESS && timestamp_pool != VK_NULL_HANDLE;
+    }
+    __android_log_print(ANDROID_LOG_WARN,
+                        "blender-gputime",
+                        "gpu timestamps %s: pool=%u valid_bits=%u period=%.2fns",
+                        timestamps_enabled ? "on" : "off",
+                        timestamp_pool_size,
+                        timestamp_valid_bits,
+                        double(properties.limits.timestampPeriod));
+  }
+#endif
+
   render_graph::VKScheduler scheduler;
   render_graph::VKCommandBuilder command_builder;
   Vector<VkCommandBuffer> command_buffers_unused;
@@ -242,6 +316,131 @@ void VKDevice::submission_runner(VKDevice *device)
   std::optional<render_graph::VKCommandBufferWrapper> command_buffer;
   uint64_t previous_gc_timeline = 0;
   uint64_t num_nodes = 0;
+
+#ifdef __ANDROID__
+  render_graph::VKScopeTimestampConfig timestamp_config;
+  timestamp_config.pool = timestamp_pool;
+  timestamp_config.pool_size = timestamp_pool_size;
+  timestamp_config.cursor = &timestamp_cursor;
+  timestamp_config.enabled = timestamps_enabled;
+  command_builder.timestamps_configure(timestamp_config);
+
+  /* Read back the timestamp pairs of completed submissions and fold them into the window report.
+   * A submission's queries are only read once its timeline value has passed, so the results are
+   * available without waiting. */
+  auto retire_timestamps = [&](uint64_t finished_timeline) {
+    for (int64_t i = int64_t(timestamp_pending.size()) - 1; i >= 0; i--) {
+      GPUProfilePending &pending = timestamp_pending[i];
+      if (pending.timeline > finished_timeline) {
+        continue;
+      }
+      double submit_ms = 0.0;
+      for (const render_graph::VKScopeTimestamp &scope : pending.scopes) {
+        uint64_t results[2] = {0, 0};
+        const VkResult result = device->functions.vkGetQueryPoolResults(device->vk_device_,
+                                                                        timestamp_pool,
+                                                                        scope.begin_query,
+                                                                        2,
+                                                                        sizeof(results),
+                                                                        results,
+                                                                        sizeof(uint64_t),
+                                                                        VK_QUERY_RESULT_WAIT_BIT |
+                                                                            VK_QUERY_RESULT_64_BIT);
+        if (result != VK_SUCCESS) {
+          continue;
+        }
+        uint64_t begin_ticks = results[0];
+        uint64_t end_ticks = results[1];
+        if (timestamp_valid_bits < 64) {
+          const uint64_t mask = (uint64_t(1) << timestamp_valid_bits) - 1;
+          begin_ticks &= mask;
+          end_ticks &= mask;
+          if (end_ticks < begin_ticks) {
+            end_ticks += mask + 1;
+          }
+        }
+        const double scope_ms = double(end_ticks - begin_ticks) * timestamp_period_ms;
+        submit_ms += scope_ms;
+        GPUProfileScope *accum = nullptr;
+        for (GPUProfileScope &candidate : timestamp_stats) {
+          if (candidate.tag == scope.tag && candidate.width == scope.width &&
+              candidate.height == scope.height && candidate.offset_x == scope.offset_x &&
+              candidate.offset_y == scope.offset_y)
+          {
+            accum = &candidate;
+            break;
+          }
+        }
+        if (accum == nullptr) {
+          timestamp_stats.append(GPUProfileScope{scope.tag,
+                                                 scope.width,
+                                                 scope.height,
+                                                 scope.offset_x,
+                                                 scope.offset_y,
+                                                 0,
+                                                 0.0,
+                                                 0.0});
+          accum = &timestamp_stats.last();
+        }
+        accum->count++;
+        accum->sum_ms += scope_ms;
+        if (scope_ms > accum->max_ms) {
+          accum->max_ms = scope_ms;
+        }
+        timestamp_samples++;
+      }
+      if (!pending.scopes.is_empty()) {
+        timestamp_submits++;
+        timestamp_submit_sum_ms += submit_ms;
+        if (submit_ms > timestamp_submit_max_ms) {
+          timestamp_submit_max_ms = submit_ms;
+        }
+      }
+      timestamp_pending.remove(i);
+    }
+
+    if (timestamp_samples >= 60) {
+      std::sort(timestamp_stats.begin(),
+                timestamp_stats.end(),
+                [](const GPUProfileScope &a, const GPUProfileScope &b) {
+                  return (a.sum_ms / double(a.count)) > (b.sum_ms / double(b.count));
+                });
+      std::string report;
+      char chunk[224];
+      snprintf(chunk,
+               sizeof(chunk),
+               "window: scopes=%llu submits=%llu gpu/submit avg=%.2fms max=%.2fms",
+               (unsigned long long)timestamp_samples,
+               (unsigned long long)timestamp_submits,
+               timestamp_submits ? timestamp_submit_sum_ms / double(timestamp_submits) : 0.0,
+               timestamp_submit_max_ms);
+      report = chunk;
+      for (const GPUProfileScope &scope : timestamp_stats) {
+        if (report.size() > 1400) {
+          break;
+        }
+        snprintf(chunk,
+                 sizeof(chunk),
+                 " | %016llx %ux%u+%d+%d n=%llu avg=%.2f max=%.2f",
+                 (unsigned long long)scope.tag,
+                 scope.width,
+                 scope.height,
+                 int(scope.offset_x),
+                 int(scope.offset_y),
+                 (unsigned long long)scope.count,
+                 scope.sum_ms / double(scope.count),
+                 scope.max_ms);
+        report += chunk;
+      }
+      __android_log_print(ANDROID_LOG_WARN, "blender-gputime", "%s", report.c_str());
+      timestamp_stats.clear();
+      timestamp_samples = 0;
+      timestamp_submits = 0;
+      timestamp_submit_sum_ms = 0.0;
+      timestamp_submit_max_ms = 0.0;
+    }
+  };
+#endif
 
   CLOG_TRACE(&LOG, "Submission runner initialized");
   while (!device->submission_thread_should_exit_) {
@@ -254,6 +453,11 @@ void VKDevice::submission_runner(VKDevice *device)
     if (assign_if_different(previous_gc_timeline, current_timeline)) {
       device->orphaned_data.destroy_discarded_resources(*device, current_timeline);
     }
+#ifdef __ANDROID__
+    if (timestamps_enabled) {
+      retire_timestamps(current_timeline);
+    }
+#endif
 
     if (!command_buffer.has_value()) {
       /* Check for completed command buffers that can be reused. */
@@ -289,9 +493,13 @@ void VKDevice::submission_runner(VKDevice *device)
     Span<render_graph::NodeHandle> node_handles = scheduler.select_nodes(render_graph);
     {
       std::scoped_lock lock_resources(device->resources.mutex);
+      PERF_ZONE(vk_build_nodes);
       command_builder.build_nodes(render_graph, *command_buffer, node_handles);
     }
-    command_builder.record_commands(render_graph, *command_buffer, node_handles);
+    {
+      PERF_ZONE(vk_record_commands);
+      command_builder.record_commands(render_graph, *command_buffer, node_handles);
+    }
     num_nodes += node_handles.size();
 
     if (submit_task->submit_to_device) {
@@ -331,6 +539,7 @@ void VKDevice::submission_runner(VKDevice *device)
       const uint64_t submitted_nodes = num_nodes;
       num_nodes = 0;
 
+      VkResult submit_result = VK_SUCCESS;
       if (device->is_device_lost()) {
         /* Queue is dead; every further submit would fail. Skip it, but keep draining the task
          * queue so waiters are released and command buffers are recycled. */
@@ -339,8 +548,11 @@ void VKDevice::submission_runner(VKDevice *device)
       }
       else {
         std::scoped_lock lock_queue(*device->queue_mutex_);
-        VkResult submit_result = device->functions.vkQueueSubmit(
-            device->vk_queue_, 1, &vk_submit_info, submit_task->signal_fence);
+        {
+          PERF_ZONE(vk_queue_submit);
+          submit_result = device->functions.vkQueueSubmit(
+              device->vk_queue_, 1, &vk_submit_info, submit_task->signal_fence);
+        }
         VKSUBLOG(
             "submit timeline=%llu nodes=%u waits_for=%llu signalled=%llu wait_sem=%p "
             "signal_sem=%p res=%d",
@@ -362,6 +574,23 @@ void VKDevice::submission_runner(VKDevice *device)
           }
         }
       }
+#ifdef __ANDROID__
+      /* Hand the scope timestamps over for readback. The pairs are only read when the commands
+       * were really submitted, otherwise no query is ever written for them. */
+      if (timestamps_enabled) {
+        const Span<render_graph::VKScopeTimestamp> scopes =
+            command_builder.scope_timestamps_get();
+        if (submit_result == VK_SUCCESS && !device->is_device_lost() && !scopes.is_empty()) {
+          timestamp_pending.append(GPUProfilePending{});
+          GPUProfilePending &pending = timestamp_pending.last();
+          pending.timeline = submit_task->timeline;
+          for (const render_graph::VKScopeTimestamp &scope : scopes) {
+            pending.scopes.append(scope);
+          }
+        }
+        command_builder.scope_timestamps_clear();
+      }
+#endif
       if (submit_task->wait_for_submission != nullptr) {
         std::unique_lock<Mutex> lock(submit_task->wait_for_submission->is_submitted_mutex);
         submit_task->wait_for_submission->is_submitted = true;
@@ -392,6 +621,15 @@ void VKDevice::submission_runner(VKDevice *device)
                                          vk_command_pool,
                                          command_buffers_unused.size(),
                                          command_buffers_unused.data());
+#ifdef __ANDROID__
+  if (timestamp_pool != VK_NULL_HANDLE) {
+    /* The device is idle here, so every outstanding pair can be read back before teardown. */
+    if (!device->is_device_lost()) {
+      retire_timestamps(UINT64_MAX);
+    }
+    device->functions.vkDestroyQueryPool(device->vk_device_, timestamp_pool, nullptr);
+  }
+#endif
   device->functions.vkDestroyCommandPool(device->vk_device_, vk_command_pool, nullptr);
   CLOG_TRACE(&LOG, "Submission runner finished");
 }

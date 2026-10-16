@@ -26,6 +26,33 @@ struct LayeredImageBinding {
 };
 
 /**
+ * GPU scope timing, driven from the submission thread. The command builder writes one timestamp
+ * query pair around every recorded render scope; the caller owns the pool and the cursor and reads
+ * the pairs back once the submission has completed. Disabled by default, so nothing changes unless
+ * the on-device profiler turns it on.
+ */
+struct VKScopeTimestampConfig {
+  VkQueryPool pool = VK_NULL_HANDLE;
+  uint32_t pool_size = 0;
+  /** Write cursor into the pool, advanced by two per scope. Owned by the caller. */
+  uint32_t *cursor = nullptr;
+  bool enabled = false;
+};
+
+/** One recorded render scope, tagged with the two queries written around its commands. */
+struct VKScopeTimestamp {
+  /** Attachment set identity, the same tag the scope accounting logs. */
+  uint64_t tag = 0;
+  uint32_t begin_query = 0;
+  uint32_t end_query = 0;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t offset_x = 0;
+  uint32_t offset_y = 0;
+  uint32_t color_count = 0;
+};
+
+/**
  * Build the command buffer for sending to the device queue.
  *
  * Determine which nodes needs to be scheduled, Then for each node generate the needed pipeline
@@ -69,6 +96,14 @@ class VKCommandBuilder {
   uint32_t scope_repeat = 0;
   uint32_t scope_repeat_foreign = 0;
 
+  /** GPU scope timing. The configuration is set once; the list accumulates the scopes recorded
+   * since the last submission and is drained by the submission thread when it submits. */
+  VKScopeTimestampConfig timestamp_config_;
+  Vector<VKScopeTimestamp> scope_timestamps_;
+  /** Index into `scope_timestamps_` of the pair whose begin timestamp was written and whose end
+   * timestamp is still pending, -1 when no scope is open. */
+  int64_t timestamp_open_index_ = -1;
+
   /**
    * A join between two scopes: an END_RENDERING immediately followed by a BEGIN_RENDERING on the
    * same attachments and render area. Nothing is recorded between the two nodes, so the pair can
@@ -100,6 +135,12 @@ class VKCommandBuilder {
                     int prev_node_type,
                     bool directly_adjacent,
                     bool matches_previous) const;
+
+  /** Opens a timestamp pair for a scope that is about to record its begin. */
+  void timestamp_scope_begin(VKCommandBufferInterface &command_buffer,
+                             const VKBeginRenderingData &begin_data);
+  /** Writes the end timestamp of the pair opened by `timestamp_scope_begin`, if any. */
+  void timestamp_scope_end(VKCommandBufferInterface &command_buffer);
 
   struct Barrier {
     /** Index range into `VKCommandBuilder::vk_buffer_memory_barriers_` */
@@ -266,6 +307,25 @@ class VKCommandBuilder {
   void record_commands(VKRenderGraph &render_graph,
                        VKCommandBufferInterface &command_buffer,
                        Span<NodeHandle> node_handles);
+
+  /**
+   * GPU scope timing. Configure before recording; the builder writes one query pair per scope.
+   * `scope_timestamps_get` returns the pairs recorded since the last `scope_timestamps_clear`,
+   * which the submission thread calls when it hands the pairs over for readback.
+   */
+  void timestamps_configure(const VKScopeTimestampConfig &config)
+  {
+    timestamp_config_ = config;
+  }
+  Span<VKScopeTimestamp> scope_timestamps_get() const
+  {
+    return scope_timestamps_;
+  }
+  void scope_timestamps_clear()
+  {
+    scope_timestamps_.clear();
+    timestamp_open_index_ = -1;
+  }
 
  private:
   /**

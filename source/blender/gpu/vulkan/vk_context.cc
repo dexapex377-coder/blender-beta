@@ -6,6 +6,8 @@
  * \ingroup gpu
  */
 
+#include "BLI_perf_probe.hh"
+
 #include "DNA_userdef_types.h"
 
 #include "GPU_debug.hh"
@@ -156,6 +158,29 @@ void VKContext::begin_frame() {}
 
 void VKContext::end_frame()
 {
+  /* Frame period: the time between consecutive frame ends. Correlates the CPU side of the frame
+   * (the perf zones on this path) with the GPU scope timings and the presented cadence. Printed
+   * like the perf zones so all of it can be read with one filter. */
+  {
+    using Clock = std::chrono::steady_clock;
+    static Clock::time_point previous = Clock::now();
+    static double sum_ms = 0.0;
+    static int count = 0;
+    static const bool perf_enabled = blender::perf::enabled();
+    const Clock::time_point now = Clock::now();
+    const double frame_ms = std::chrono::duration<double, std::milli>(now - previous).count();
+    previous = now;
+    /* The first call after startup and long stalls (shader compile, app backgrounded) would
+     * otherwise dominate the window. */
+    if (perf_enabled && frame_ms < 1000.0) {
+      sum_ms += frame_ms;
+      if (++count >= 30) {
+        printf("[perf] vk_frame_period: %.2f ms avg (last %d)\n", sum_ms / count, count);
+        sum_ms = 0.0;
+        count = 0;
+      }
+    }
+  }
   this->process_frame_timings();
 }
 
@@ -172,6 +197,7 @@ TimelineValue VKContext::flush_render_graph(RenderGraphFlushFlags flags,
                                             VkSemaphore signal_semaphore,
                                             VkFence signal_fence)
 {
+  PERF_ZONE(vk_flush_rg);
   if (has_active_framebuffer()) {
     VKFrameBuffer &framebuffer = *active_framebuffer_get();
     if (framebuffer.is_rendering()) {
@@ -438,6 +464,7 @@ void VKContext::swap_buffer_acquired_handler()
 void VKContext::swap_buffer_draw_handler(const GHOST_VulkanSwapChainData &swap_chain_data,
                                          bool wait_for_submission)
 {
+  PERF_ZONE(vk_swap_draw);
   const bool do_blit_to_swapchain = swap_chain_data.image != VK_NULL_HANDLE;
   const bool use_shader = ELEM(swap_chain_data.surface_format.colorSpace,
                                VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT,

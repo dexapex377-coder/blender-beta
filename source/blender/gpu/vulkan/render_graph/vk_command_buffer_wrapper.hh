@@ -134,6 +134,16 @@ class VKCommandBufferInterface {
   virtual void reset_query_pool(VkQueryPool vk_query_pool,
                                 uint32_t first_query,
                                 uint32_t query_count) = 0;
+  /**
+   * Timestamp queries, written around render scopes by the on-device GPU profiler. The default
+   * implementation does nothing so implementations that do not talk to a device (the render graph
+   * tests) do not have to record them.
+   */
+  virtual void write_timestamp(VkQueryPool /*vk_query_pool*/,
+                               uint32_t /*query_index*/,
+                               VkPipelineStageFlagBits /*stage*/)
+  {
+  }
   /* Dynamic states. */
 
   virtual void set_viewport(const Vector<VkViewport> viewports) = 0;
@@ -295,6 +305,9 @@ class VKCommandBufferWrapper : public VKCommandBufferInterface {
                    VkQueryControlFlags vk_query_control_flags) override;
   void end_query(VkQueryPool vk_query_pool, uint32_t query_index) override;
   void reset_query_pool(VkQueryPool, uint32_t first_query, uint32_t query_count) override;
+  void write_timestamp(VkQueryPool vk_query_pool,
+                       uint32_t query_index,
+                       VkPipelineStageFlagBits stage) override;
   void begin_rendering(const VkRenderingInfo *p_rendering_info) override;
   void end_rendering() override;
   void begin_render_pass(VkRenderPass vk_render_pass,
@@ -310,6 +323,37 @@ class VKCommandBufferWrapper : public VKCommandBufferInterface {
       const VkAccelerationStructureBuildGeometryInfoKHR *p_infos,
       const VkAccelerationStructureBuildRangeInfoKHR *p_build_range_infos) override;
 };
+
+/**
+ * Command counts gathered by the wrapper while a command buffer is recorded, taken and reset by
+ * the reporting window in the command builder. Diagnostic counters only; each one is an increment
+ * next to the vkCmd* call it counts, so the counters themselves do not matter for the timings.
+ */
+struct VKCmdCounters {
+  uint64_t draw_calls = 0;
+  uint64_t dispatch_calls = 0;
+  uint64_t barrier_calls = 0;
+  /** Total memory/buffer/image barriers inside the barrier calls. */
+  uint64_t barriers = 0;
+  uint64_t begin_rendering = 0;
+  uint64_t end_rendering = 0;
+  uint64_t begin_render_pass = 0;
+  uint64_t end_render_pass = 0;
+  uint64_t bind_pipeline = 0;
+  uint64_t bind_descriptor_sets = 0;
+  uint64_t bind_vertex_buffers = 0;
+  uint64_t bind_index_buffer = 0;
+  uint64_t push_constants = 0;
+  uint64_t set_viewport = 0;
+  uint64_t set_scissor = 0;
+  uint64_t copy_calls = 0;
+  uint64_t clear_calls = 0;
+  uint64_t update_buffer = 0;
+};
+
+/** Returns the counters accumulated so far and resets them. */
+VKCmdCounters vk_cmd_counters_take();
+
 }  // namespace gpu::render_graph
 
 }  // namespace blender

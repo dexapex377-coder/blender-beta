@@ -9,6 +9,7 @@
 #include "vk_command_builder.hh"
 #include "BLI_index_range.hh"
 #include "vk_backend.hh"
+#include "vk_command_buffer_wrapper.hh"
 #include "vk_render_graph.hh"
 #include "vk_render_pass_fallback.hh"
 #include "vk_to_string.hh"
@@ -51,6 +52,21 @@ void VKCommandBuilder::build_nodes(VKRenderGraph &render_graph,
       render_graph, node_handles, command_buffer.use_dynamic_rendering_local_read);
 }
 
+/* Identity of the attachment set, so two scopes printing the same tag are candidates for being
+ * merged into one render pass. The views are the framebuffer's identity; the render area and the
+ * attachment count have to agree as well, since a merge also requires the same subpass shape. */
+static uint64_t scope_view_tag(const VKBeginRenderingData &begin_data)
+{
+  uint64_t view_tag = 1469598103934665603ull;
+  auto mix = [&view_tag](uint64_t v) { view_tag = (view_tag ^ v) * 1099511628211ull; };
+  for (uint32_t i = 0; i < begin_data.vk_rendering_info.colorAttachmentCount; i++) {
+    mix(reinterpret_cast<uintptr_t>(begin_data.color_attachments[i].imageView));
+  }
+  mix(reinterpret_cast<uintptr_t>(begin_data.depth_attachment.imageView));
+  mix(reinterpret_cast<uintptr_t>(begin_data.stencil_attachment.imageView));
+  return view_tag;
+}
+
 #ifdef __ANDROID__
 void VKCommandBuilder::scope_detail(const VKBeginRenderingData &begin_data,
                                     const int prev_node_type,
@@ -68,15 +84,7 @@ void VKCommandBuilder::scope_detail(const VKBeginRenderingData &begin_data,
   /* Identity of the attachment set, so two scopes printing the same tag are candidates for being
    * merged into one render pass. The views are the framebuffer's identity; the render area and the
    * attachment count have to agree as well, since a merge also requires the same subpass shape. */
-  uint64_t view_tag = 1469598103934665603ull;
-  auto mix = [&view_tag](uint64_t v) {
-    view_tag = (view_tag ^ v) * 1099511628211ull;
-  };
-  for (uint32_t i = 0; i < begin_data.vk_rendering_info.colorAttachmentCount; i++) {
-    mix(reinterpret_cast<uintptr_t>(begin_data.color_attachments[i].imageView));
-  }
-  mix(reinterpret_cast<uintptr_t>(begin_data.depth_attachment.imageView));
-  mix(reinterpret_cast<uintptr_t>(begin_data.stencil_attachment.imageView));
+  const uint64_t view_tag = scope_view_tag(begin_data);
 
   const VkRect2D &area = begin_data.vk_rendering_info.renderArea;
   uint32_t depth_op = 0;
@@ -326,6 +334,8 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
       char value[PROP_VALUE_MAX] = {};
       return __system_property_get("debug.blender.perf", value) > 0 && atoi(value) != 0;
     }();
+    /* Always taken so the window resets with the scope totals whether or not it is printed. */
+    const VKCmdCounters cmds = vk_cmd_counters_take();
     if (log_enabled) {
       __android_log_print(ANDROID_LOG_WARN,
                           "blender-scope",
@@ -347,6 +357,29 @@ void VKCommandBuilder::record_commands(VKRenderGraph &render_graph,
                           uint32_t(scope_repeat / scope_report_frames),
                           uint32_t(scope_repeat_foreign / scope_report_frames),
                           uint32_t(scope_merged / scope_report_frames));
+      __android_log_print(ANDROID_LOG_WARN,
+                          "blender-scope",
+                          "cmds/frame: draw=%llu dispatch=%llu barrier=%llu(%llu) pipe=%llu "
+                          "ds=%llu vbo=%llu ibo=%llu pc=%llu vp=%llu sc=%llu copy=%llu "
+                          "clear=%llu upd=%llu | rend: dyn=%llu/%llu rp=%llu/%llu",
+                          (unsigned long long)(cmds.draw_calls / scope_report_frames),
+                          (unsigned long long)(cmds.dispatch_calls / scope_report_frames),
+                          (unsigned long long)(cmds.barrier_calls / scope_report_frames),
+                          (unsigned long long)(cmds.barriers / scope_report_frames),
+                          (unsigned long long)(cmds.bind_pipeline / scope_report_frames),
+                          (unsigned long long)(cmds.bind_descriptor_sets / scope_report_frames),
+                          (unsigned long long)(cmds.bind_vertex_buffers / scope_report_frames),
+                          (unsigned long long)(cmds.bind_index_buffer / scope_report_frames),
+                          (unsigned long long)(cmds.push_constants / scope_report_frames),
+                          (unsigned long long)(cmds.set_viewport / scope_report_frames),
+                          (unsigned long long)(cmds.set_scissor / scope_report_frames),
+                          (unsigned long long)(cmds.copy_calls / scope_report_frames),
+                          (unsigned long long)(cmds.clear_calls / scope_report_frames),
+                          (unsigned long long)(cmds.update_buffer / scope_report_frames),
+                          (unsigned long long)(cmds.begin_rendering / scope_report_frames),
+                          (unsigned long long)(cmds.end_rendering / scope_report_frames),
+                          (unsigned long long)(cmds.begin_render_pass / scope_report_frames),
+                          (unsigned long long)(cmds.end_render_pass / scope_report_frames));
     }
     scope_pixels = 0;
     scope_count = 0;
@@ -810,6 +843,61 @@ void VKCommandBuilder::apply_scope_merge_store_patches(VKRenderGraph &render_gra
   }
 }
 
+/* -------------------------------------------------------------------- */
+/** \name GPU scope timing
+ * \{ */
+
+void VKCommandBuilder::timestamp_scope_begin(VKCommandBufferInterface &command_buffer,
+                                             const VKBeginRenderingData &begin_data)
+{
+  if (!timestamp_config_.enabled || timestamp_config_.pool == VK_NULL_HANDLE ||
+      timestamp_config_.cursor == nullptr)
+  {
+    return;
+  }
+
+  /* One query pair per scope. The cursor is the caller's; it wraps so the pool is reused, and
+   * every pair is reset before it is written. */
+  uint32_t &cursor = *timestamp_config_.cursor;
+  if (cursor + 2 > timestamp_config_.pool_size) {
+    cursor = 0;
+  }
+  const uint32_t begin_query = cursor;
+  cursor += 2;
+
+  /* The reset has to happen outside a render pass instance; every begin is recorded before the
+   * scope opens, so this is a legal place for it. */
+  command_buffer.reset_query_pool(timestamp_config_.pool, begin_query, 2);
+  command_buffer.write_timestamp(
+      timestamp_config_.pool, begin_query, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+
+  const VkRect2D &area = begin_data.vk_rendering_info.renderArea;
+  VKScopeTimestamp scope_timestamp;
+  scope_timestamp.tag = scope_view_tag(begin_data);
+  scope_timestamp.begin_query = begin_query;
+  scope_timestamp.end_query = begin_query + 1;
+  scope_timestamp.width = area.extent.width;
+  scope_timestamp.height = area.extent.height;
+  scope_timestamp.offset_x = area.offset.x;
+  scope_timestamp.offset_y = area.offset.y;
+  scope_timestamp.color_count = begin_data.vk_rendering_info.colorAttachmentCount;
+  scope_timestamps_.append(scope_timestamp);
+  timestamp_open_index_ = int64_t(scope_timestamps_.size()) - 1;
+}
+
+void VKCommandBuilder::timestamp_scope_end(VKCommandBufferInterface &command_buffer)
+{
+  if (timestamp_open_index_ < 0 || !timestamp_config_.enabled) {
+    return;
+  }
+  command_buffer.write_timestamp(timestamp_config_.pool,
+                                 scope_timestamps_[timestamp_open_index_].end_query,
+                                 VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+  timestamp_open_index_ = -1;
+}
+
+/** \} */
+
 void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
                                              VKCommandBufferInterface &command_buffer,
                                              Span<NodeHandle> node_handles)
@@ -819,6 +907,10 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
 
   NodeHandle rendering_scope = 0;
   bool rendering_active = false;
+  /** Set while walking the nodes of the scope whose begin commands are still to be recorded. */
+  const VKBeginRenderingData *pending_begin_data = nullptr;
+  /** Set when the node being recorded closes an open scope (see VKEndRenderingNode). */
+  bool pending_end_close = false;
 
   for (int64_t group_index : group_nodes_.index_range()) {
     IndexRange group_nodes = group_nodes_[group_index];
@@ -948,9 +1040,15 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
         rendering_scope = node_handle;
         rendering_active = true;
         scope_count++;
+        /* The begin commands are recorded further down (after the node barriers); write the begin
+         * timestamp there, just before the scope opens. */
+        pending_begin_data = &render_graph.storage_.begin_rendering[node.storage_index];
       }
 
       else if (node.type == VKNodeType::END_RENDERING) {
+        /* The END node records the close further down. Remember whether it really closes an open
+         * scope before the flag is cleared, so the timing pair matches the command stream. */
+        pending_end_close = rendering_active;
         rendering_active = false;
       }
       else if (node_type_is_within_rendering(node.type)) {
@@ -959,6 +1057,8 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
           VKRenderGraphNode &rendering_node = render_graph.nodes_[rendering_scope];
           VKBeginRenderingNode::reconfigure_for_restart(
               render_graph.storage_.begin_rendering[rendering_node.storage_index]);
+          timestamp_scope_begin(
+              command_buffer, render_graph.storage_.begin_rendering[rendering_node.storage_index]);
           rendering_node.build_commands(command_buffer, render_graph.storage_, active_pipelines);
           rendering_active = true;
         }
@@ -984,7 +1084,15 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
                 << ", node_type=" << node.type
                 << ", debug group=" << render_graph.full_debug_group(node_handle) << "\n";
 #endif
+      if (pending_begin_data != nullptr) {
+        timestamp_scope_begin(command_buffer, *pending_begin_data);
+        pending_begin_data = nullptr;
+      }
       node.build_commands(command_buffer, render_graph.storage_, active_pipelines);
+      if (pending_end_close) {
+        timestamp_scope_end(command_buffer);
+        pending_end_close = false;
+      }
     }
 
     if (rendering_active && !scope_merge_skipped(group_node_handles.last())) {
@@ -1002,6 +1110,8 @@ void VKCommandBuilder::groups_build_commands(VKRenderGraph &render_graph,
       else {
         command_buffer.end_rendering();
       }
+      /* The scope is closed here, so its timing pair closes with it. */
+      timestamp_scope_end(command_buffer);
     }
 
     /* Record group post barriers. */

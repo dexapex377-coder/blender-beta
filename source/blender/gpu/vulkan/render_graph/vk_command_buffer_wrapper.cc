@@ -17,6 +17,18 @@
 #endif
 
 namespace blender::gpu::render_graph {
+
+/* Command counters for the reporting window. Only the submission thread records commands, so no
+ * synchronization is needed. Taken (and reset) by VKCommandBuilder::record_commands. */
+static VKCmdCounters cmd_counters;
+
+VKCmdCounters vk_cmd_counters_take()
+{
+  const VKCmdCounters result = cmd_counters;
+  cmd_counters = {};
+  return result;
+}
+
 VKCommandBufferWrapper::VKCommandBufferWrapper(VkCommandBuffer vk_command_buffer,
                                                const VolkDeviceTable &functions,
                                                const VKExtensions &extensions,
@@ -46,6 +58,7 @@ void VKCommandBufferWrapper::end_recording()
 void VKCommandBufferWrapper::bind_pipeline(VkPipelineBindPoint pipeline_bind_point,
                                            VkPipeline pipeline)
 {
+  cmd_counters.bind_pipeline++;
   functions->vkCmdBindPipeline(vk_command_buffer_, pipeline_bind_point, pipeline);
 }
 
@@ -57,6 +70,7 @@ void VKCommandBufferWrapper::bind_descriptor_sets(VkPipelineBindPoint pipeline_b
                                                   uint32_t dynamic_offset_count,
                                                   const uint32_t *p_dynamic_offsets)
 {
+  cmd_counters.bind_descriptor_sets++;
   functions->vkCmdBindDescriptorSets(vk_command_buffer_,
                                      pipeline_bind_point,
                                      layout,
@@ -71,6 +85,7 @@ void VKCommandBufferWrapper::bind_index_buffer(VkBuffer buffer,
                                                VkDeviceSize offset,
                                                VkIndexType index_type)
 {
+  cmd_counters.bind_index_buffer++;
   functions->vkCmdBindIndexBuffer(vk_command_buffer_, buffer, offset, index_type);
 }
 
@@ -79,6 +94,7 @@ void VKCommandBufferWrapper::bind_vertex_buffers(uint32_t first_binding,
                                                  const VkBuffer *p_buffers,
                                                  const VkDeviceSize *p_offsets)
 {
+  cmd_counters.bind_vertex_buffers++;
   functions->vkCmdBindVertexBuffers(
       vk_command_buffer_, first_binding, binding_count, p_buffers, p_offsets);
 }
@@ -88,6 +104,7 @@ void VKCommandBufferWrapper::draw(uint32_t vertex_count,
                                   uint32_t first_vertex,
                                   uint32_t first_instance)
 {
+  cmd_counters.draw_calls++;
   functions->vkCmdDraw(
       vk_command_buffer_, vertex_count, instance_count, first_vertex, first_instance);
 }
@@ -98,6 +115,7 @@ void VKCommandBufferWrapper::draw_indexed(uint32_t index_count,
                                           int32_t vertex_offset,
                                           uint32_t first_instance)
 {
+  cmd_counters.draw_calls++;
   functions->vkCmdDrawIndexed(
       vk_command_buffer_, index_count, instance_count, first_index, vertex_offset, first_instance);
 }
@@ -107,6 +125,7 @@ void VKCommandBufferWrapper::draw_indirect(VkBuffer buffer,
                                            uint32_t draw_count,
                                            uint32_t stride)
 {
+  cmd_counters.draw_calls++;
   functions->vkCmdDrawIndirect(vk_command_buffer_, buffer, offset, draw_count, stride);
 }
 
@@ -115,6 +134,7 @@ void VKCommandBufferWrapper::draw_indexed_indirect(VkBuffer buffer,
                                                    uint32_t draw_count,
                                                    uint32_t stride)
 {
+  cmd_counters.draw_calls++;
   functions->vkCmdDrawIndexedIndirect(vk_command_buffer_, buffer, offset, draw_count, stride);
 }
 
@@ -122,11 +142,13 @@ void VKCommandBufferWrapper::dispatch(uint32_t group_count_x,
                                       uint32_t group_count_y,
                                       uint32_t group_count_z)
 {
+  cmd_counters.dispatch_calls++;
   functions->vkCmdDispatch(vk_command_buffer_, group_count_x, group_count_y, group_count_z);
 }
 
 void VKCommandBufferWrapper::dispatch_indirect(VkBuffer buffer, VkDeviceSize offset)
 {
+  cmd_counters.dispatch_calls++;
   functions->vkCmdDispatchIndirect(vk_command_buffer_, buffer, offset);
 }
 
@@ -135,6 +157,7 @@ void VKCommandBufferWrapper::update_buffer(VkBuffer dst_buffer,
                                            VkDeviceSize data_size,
                                            const void *p_data)
 {
+  cmd_counters.update_buffer++;
   functions->vkCmdUpdateBuffer(vk_command_buffer_, dst_buffer, dst_offset, data_size, p_data);
 }
 
@@ -143,6 +166,7 @@ void VKCommandBufferWrapper::copy_buffer(VkBuffer src_buffer,
                                          uint32_t region_count,
                                          const VkBufferCopy *p_regions)
 {
+  cmd_counters.copy_calls++;
   functions->vkCmdCopyBuffer(vk_command_buffer_, src_buffer, dst_buffer, region_count, p_regions);
 }
 
@@ -153,6 +177,7 @@ void VKCommandBufferWrapper::copy_image(VkImage src_image,
                                         uint32_t region_count,
                                         const VkImageCopy *p_regions)
 {
+  cmd_counters.copy_calls++;
   functions->vkCmdCopyImage(vk_command_buffer_,
                             src_image,
                             src_image_layout,
@@ -170,6 +195,7 @@ void VKCommandBufferWrapper::blit_image(VkImage src_image,
                                         const VkImageBlit *p_regions,
                                         VkFilter filter)
 {
+  cmd_counters.copy_calls++;
   functions->vkCmdBlitImage(vk_command_buffer_,
                             src_image,
                             src_image_layout,
@@ -186,6 +212,7 @@ void VKCommandBufferWrapper::copy_buffer_to_image(VkBuffer src_buffer,
                                                   uint32_t region_count,
                                                   const VkBufferImageCopy *p_regions)
 {
+  cmd_counters.copy_calls++;
   functions->vkCmdCopyBufferToImage(
       vk_command_buffer_, src_buffer, dst_image, dst_image_layout, region_count, p_regions);
 }
@@ -196,6 +223,7 @@ void VKCommandBufferWrapper::copy_image_to_buffer(VkImage src_image,
                                                   uint32_t region_count,
                                                   const VkBufferImageCopy *p_regions)
 {
+  cmd_counters.copy_calls++;
   functions->vkCmdCopyImageToBuffer(
       vk_command_buffer_, src_image, src_image_layout, dst_buffer, region_count, p_regions);
 }
@@ -205,6 +233,7 @@ void VKCommandBufferWrapper::fill_buffer(VkBuffer dst_buffer,
                                          VkDeviceSize size,
                                          uint32_t data)
 {
+  cmd_counters.clear_calls++;
   functions->vkCmdFillBuffer(vk_command_buffer_, dst_buffer, dst_offset, size, data);
 }
 
@@ -214,6 +243,7 @@ void VKCommandBufferWrapper::clear_color_image(VkImage image,
                                                uint32_t range_count,
                                                const VkImageSubresourceRange *p_ranges)
 {
+  cmd_counters.clear_calls++;
   functions->vkCmdClearColorImage(
       vk_command_buffer_, image, image_layout, p_color, range_count, p_ranges);
 }
@@ -224,6 +254,7 @@ void VKCommandBufferWrapper::clear_depth_stencil_image(
     uint32_t range_count,
     const VkImageSubresourceRange *p_ranges)
 {
+  cmd_counters.clear_calls++;
   functions->vkCmdClearDepthStencilImage(
       vk_command_buffer_, image, image_layout, p_depth_stencil, range_count, p_ranges);
 }
@@ -233,6 +264,7 @@ void VKCommandBufferWrapper::clear_attachments(uint32_t attachment_count,
                                                uint32_t rect_count,
                                                const VkClearRect *p_rects)
 {
+  cmd_counters.clear_calls++;
   functions->vkCmdClearAttachments(
       vk_command_buffer_, attachment_count, p_attachments, rect_count, p_rects);
 }
@@ -248,6 +280,9 @@ void VKCommandBufferWrapper::pipeline_barrier(
     uint32_t image_memory_barrier_count,
     const VkImageMemoryBarrier *p_image_memory_barriers)
 {
+  cmd_counters.barrier_calls++;
+  cmd_counters.barriers += uint64_t(memory_barrier_count) + uint64_t(buffer_memory_barrier_count) +
+                           uint64_t(image_memory_barrier_count);
   functions->vkCmdPipelineBarrier(vk_command_buffer_,
                                   src_stage_mask,
                                   dst_stage_mask,
@@ -266,6 +301,7 @@ void VKCommandBufferWrapper::push_constants(VkPipelineLayout layout,
                                             uint32_t size,
                                             const void *p_values)
 {
+  cmd_counters.push_constants++;
   functions->vkCmdPushConstants(vk_command_buffer_, layout, stage_flags, offset, size, p_values);
 }
 
@@ -274,6 +310,7 @@ void VKCommandBufferWrapper::set_viewport(const Vector<VkViewport> viewports)
   if (!use_dynamic_state_viewport_scissor) {
     return;
   }
+  cmd_counters.set_viewport++;
   functions->vkCmdSetViewport(vk_command_buffer_, 0, viewports.size(), viewports.data());
 }
 
@@ -282,6 +319,7 @@ void VKCommandBufferWrapper::set_scissor(const Vector<VkRect2D> scissors)
   if (!use_dynamic_state_viewport_scissor) {
     return;
   }
+  cmd_counters.set_scissor++;
   functions->vkCmdSetScissor(vk_command_buffer_, 0, scissors.size(), scissors.data());
 }
 void VKCommandBufferWrapper::set_line_width(const float line_width)
@@ -332,6 +370,7 @@ void VKCommandBufferWrapper::begin_rendering(const VkRenderingInfo *p_rendering_
     return;
   }
   BLI_assert(functions->vkCmdBeginRenderingKHR);
+  cmd_counters.begin_rendering++;
   functions->vkCmdBeginRenderingKHR(vk_command_buffer_, p_rendering_info);
 }
 
@@ -343,6 +382,7 @@ void VKCommandBufferWrapper::end_rendering()
     return;
   }
   BLI_assert(functions->vkCmdEndRenderingKHR);
+  cmd_counters.end_rendering++;
   functions->vkCmdEndRenderingKHR(vk_command_buffer_);
 }
 
@@ -385,11 +425,13 @@ void VKCommandBufferWrapper::begin_render_pass(VkRenderPass vk_render_pass,
   }
 #endif
   functions->vkCmdBeginRenderPass(vk_command_buffer_, &begin_info, inline_contents);
+  cmd_counters.begin_render_pass++;
 }
 
 void VKCommandBufferWrapper::end_render_pass()
 {
   functions->vkCmdEndRenderPass(vk_command_buffer_);
+  cmd_counters.end_render_pass++;
 }
 
 void VKCommandBufferWrapper::begin_query(VkQueryPool vk_query_pool,
@@ -410,6 +452,13 @@ void VKCommandBufferWrapper::reset_query_pool(VkQueryPool vk_query_pool,
                                               uint32_t query_count)
 {
   functions->vkCmdResetQueryPool(vk_command_buffer_, vk_query_pool, first_query, query_count);
+}
+
+void VKCommandBufferWrapper::write_timestamp(VkQueryPool vk_query_pool,
+                                             uint32_t query_index,
+                                             VkPipelineStageFlagBits stage)
+{
+  functions->vkCmdWriteTimestamp(vk_command_buffer_, stage, vk_query_pool, query_index);
 }
 
 void VKCommandBufferWrapper::begin_debug_utils_label(
