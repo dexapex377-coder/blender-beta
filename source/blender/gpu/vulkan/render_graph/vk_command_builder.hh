@@ -95,7 +95,7 @@ class VKCommandBuilder {
                   int64_t group_index,
                   IndexRange next_group,
                   Span<NodeHandle> node_handles,
-                  Span<const VKRenderGraphImage> scope_links,
+                  Span<VKRenderGraphImage> scope_links,
                   int post_image_barriers,
                   const VKRenderGraph &render_graph,
                   const char *why) const;
