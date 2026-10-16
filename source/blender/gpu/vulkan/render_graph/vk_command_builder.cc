@@ -149,6 +149,21 @@ void VKCommandBuilder::log_fusion(const char *decision,
     ss << "/" << uint64_t(link.resource.handle) << ":" << int(link.vk_access_flags);
   }
   ss << " postBarriers=" << post_image_barriers;
+  /* What the group about to run actually declares, with the layout it asks for. The layout is the
+   * field that decides legality inside an open render pass, and it is not visible from the node type
+   * or from the attachment list alone -- a link can carry the same handle and still request
+   * TRANSFER_DST_OPTIMAL, which is a layout transition and is not allowed while the image is an
+   * attachment. Without this, a group that copies to the attachment is indistinguishable from one
+   * that copies somewhere else. */
+  ss << " grouplinks=";
+  for (const int64_t i : next_group) {
+    for (const VKRenderGraphImage &link :
+         render_graph.linked_images(node_handles[i]))
+    {
+      ss << uint64_t(link.resource.handle) << "@" << int(link.vk_image_layout) << ":"
+         << int(link.vk_access_flags) << " ";
+    }
+  }
   __android_log_print(ANDROID_LOG_WARN, "blender-fusion", "%s", ss.str().c_str());
 }
 #endif
