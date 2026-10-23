@@ -13,6 +13,7 @@
 #include "BKE_object.hh"
 
 #include "BLI_function_ref.hh"
+#include "BLI_perf_probe.hh"
 
 #include "DNA_space_types.h"
 #include "DNA_workspace_types.h"
@@ -230,7 +231,9 @@ struct State {
 
   bool show_extras() const
   {
-    return (this->overlay.flag & V3D_OVERLAY_HIDE_OBJECT_XTRAS) == 0;
+    /* `debug.blender.overlay_extras 0` drops the whole Extras category for the pass-cost runs. */
+    return ((this->overlay.flag & V3D_OVERLAY_HIDE_OBJECT_XTRAS) == 0) &&
+           !blender::perf::overlay_extras_forced_off();
   }
   bool show_face_orientation() const
   {

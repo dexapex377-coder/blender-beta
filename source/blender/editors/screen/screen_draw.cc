@@ -6,6 +6,8 @@
  * \ingroup edscr
  */
 
+#include <cstdio>
+
 #include "ED_screen.hh"
 #include "ED_screen_types.hh"
 
@@ -22,6 +24,7 @@
 #include "BLI_listbase.hh"
 #include "BLI_math_color_c.hh"
 #include "BLI_math_vector_c.hh"
+#include "BLI_perf_probe.hh"
 #include "BLI_rect.hh"
 #include "BLI_time.hh"
 
@@ -123,6 +126,25 @@ void ED_screen_draw_edges(wmWindow *win)
   if (screen->areabase.is_single() && win->global_areas.areabase.first_ == nullptr) {
     /* Do not show edges on windows without global areas and with only one editor. */
     return;
+  }
+
+  /* One-shot area inventory for the pass-cost runs: 2 draws (edge batch + outline) per area. */
+  if (blender::perf::enabled()) {
+    static bool dbg_once = false;
+    if (!dbg_once) {
+      dbg_once = true;
+      int area_count = 0;
+      for (ScrArea &area : screen->areabase) {
+        (void)area;
+        area_count++;
+      }
+      int global_count = 0;
+      for (ScrArea &area : win->global_areas.areabase) {
+        (void)area;
+        global_count++;
+      }
+      printf("PERF screen areas=%d global_areas=%d\n", area_count, global_count);
+    }
   }
 
   ARegion *region = screen->active_region;

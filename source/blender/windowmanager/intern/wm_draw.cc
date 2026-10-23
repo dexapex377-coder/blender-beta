@@ -8,6 +8,7 @@
  * Handle OpenGL buffers for windowing, also paint cursor.
  */
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -27,6 +28,7 @@
 #include "BLI_math_matrix_c.hh"
 #include "BLI_math_vector_c.hh"
 #include "BLI_math_vector_types.hh"
+#include "BLI_perf_probe.hh"
 #include "BLI_rect.hh"
 #include "BLI_utildefines.hh"
 
@@ -821,6 +823,19 @@ static void wm_draw_region_blit(ARegion *region, int view)
 {
   if (!region->runtime->draw_buffer) {
     return;
+  }
+
+  /* One-shot region inventory for the pass-cost runs: identifies the window blits. */
+  static int dbg_blit_count = 0;
+  if (blender::perf::enabled() && dbg_blit_count < 24) {
+    printf("PERF blit region=%d rect=%d,%d %dx%d viewport=%d\n",
+           int(region->regiontype),
+           region->winrct.xmin,
+           region->winrct.ymin,
+           BLI_rcti_size_x(&region->winrct) + 1,
+           BLI_rcti_size_y(&region->winrct) + 1,
+           region->runtime->draw_buffer->viewport != nullptr);
+    dbg_blit_count++;
   }
 
   if (view == -1) {

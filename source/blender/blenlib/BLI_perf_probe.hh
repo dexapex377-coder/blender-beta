@@ -76,7 +76,10 @@ inline bool scope_names_enabled()
  * - `debug.blender.overlays 0`: 3D viewport overlays off, same effect on the passes as the header
  *   overlays toggle (also turns the selected-object outline off, like the toggle does).
  * - `debug.blender.outline 0`: Workbench shading outline off (the shading popover checkbox).
- * - `debug.blender.outline_selected 0`: only the selected-object outline (overlays popover). */
+ * - `debug.blender.outline_selected 0`: only the selected-object outline (overlays popover).
+ * - `debug.blender.overlay_grid 0`: 3D view grid lines off (the X/Y/Z axis lines stay).
+ * - `debug.blender.overlay_axes 0`: 3D view X/Y/Z axis lines off (the grid stays).
+ * - `debug.blender.overlay_extras 0`: 3D view "Extras" off (cameras, lights, empties, ...). */
 inline bool debug_prop_off(const char *name)
 {
 #ifdef __ANDROID__
@@ -103,6 +106,21 @@ inline bool outline_forced_off()
 inline bool outline_selected_forced_off()
 {
   return debug_prop_off("debug.blender.outline_selected");
+}
+
+inline bool overlay_grid_forced_off()
+{
+  return debug_prop_off("debug.blender.overlay_grid");
+}
+
+inline bool overlay_axes_forced_off()
+{
+  return debug_prop_off("debug.blender.overlay_axes");
+}
+
+inline bool overlay_extras_forced_off()
+{
+  return debug_prop_off("debug.blender.overlay_extras");
 }
 
 using TimePoint = std::chrono::steady_clock::time_point;
