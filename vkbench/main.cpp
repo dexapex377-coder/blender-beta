@@ -378,10 +378,10 @@ int main(int argc, char **argv) {
 
   std::vector<double> passMs(n);
   auto run_once = [&]() {
-    g_vkCmdResetQueryPool(cb, qp, 0, nTs);
     VkCommandBufferBeginInfo cbbi{}; cbbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     cbbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     g_vkBeginCommandBuffer(cb, &cbbi);
+    g_vkCmdResetQueryPool(cb, qp, 0, nTs);
     g_vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, 0);
     int idx = 1;
     for (int i = 0; i < n; i++) {
