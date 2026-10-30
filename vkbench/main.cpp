@@ -419,11 +419,14 @@ int main(int argc, char **argv) {
   auto run_once = [&]() {
     VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1; si.pCommandBuffers = &cb;
-    g_vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE);
-    g_vkQueueWaitIdle(queue);
+    VkResult sr = g_vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE);
+    fprintf(stderr, "run: submit r=%d\n", (int)sr); fflush(stderr);
+    VkResult wr = g_vkQueueWaitIdle(queue);
+    fprintf(stderr, "run: wait r=%d\n", (int)wr); fflush(stderr);
 
     std::vector<uint64_t> ts(nTs);
-    g_vkGetQueryPoolResults(device, qp, 0, nTs, nTs * sizeof(uint64_t), ts.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+    VkResult qr = g_vkGetQueryPoolResults(device, qp, 0, nTs, nTs * sizeof(uint64_t), ts.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+    fprintf(stderr, "run: query r=%d ts0=%llu tsN=%llu\n", (int)qr, (unsigned long long)ts[0], (unsigned long long)ts[idx]); fflush(stderr);
     double total = (ts[idx] - ts[0]) * tsPeriodMs;
     for (int i = 0; i < n; i++) passMs[i] = (ts[2 * i + 2] - ts[2 * i + 1]) * tsPeriodMs;
     return total;
