@@ -299,7 +299,9 @@ int main(int argc, char **argv) {
 
   VkImage colorImg, depthImg; VkDeviceMemory colorMem, depthMem;
   VkImageView colorView, depthView;
-  if (!make_image(colorFmt, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, colorImg, colorMem)) { fprintf(stderr, "color image fail\n"); return 1; }
+  fprintf(stderr, "TRACE before color\n"); fflush(stderr);
+  if (!make_image(colorFmt, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, colorImg, colorMem)) { fprintf(stderr, "TRACE COLOR FAILED\n"); fflush(stderr); _exit(42); }
+  fprintf(stderr, "TRACE after color\n"); fflush(stderr);
   if (!make_image(depthFmt, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, depthImg, depthMem)) { fprintf(stderr, "depth image fail\n"); return 1; }
   if (!make_view(colorImg, colorFmt, VK_IMAGE_ASPECT_COLOR_BIT, colorView)) { fprintf(stderr, "color view fail\n"); return 1; }
   if (!make_view(depthImg, depthFmt, VK_IMAGE_ASPECT_DEPTH_BIT, depthView)) { fprintf(stderr, "depth view fail\n"); return 1; }
@@ -420,7 +422,7 @@ int main(int argc, char **argv) {
     return total;
   };
 
-  fprintf(stderr, "step: results\n");
+  fprintf(stderr, "step: results\n"); fflush(stderr);
   double bestTotal = 1e18;
   for (int it = 0; it < iterations; it++) {
     double total = run_once();
@@ -454,5 +456,6 @@ int main(int argc, char **argv) {
   g_vkDestroyDevice(device, nullptr);
   g_vkDestroyInstance(instance, nullptr);
   dlclose(libvk);
+  fprintf(stderr, "TRACE normal exit 0\n"); fflush(stderr);
   return 0;
 }
