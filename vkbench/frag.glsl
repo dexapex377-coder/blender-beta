@@ -1,11 +1,8 @@
 #version 450
 layout(location = 0) out vec4 outColor;
 void main() {
-  vec4 c = vec4(0.0);
-  for (int i = 0; i < 64; i++) {
-    float x = float(gl_FragCoord.x) + float(i) * 0.5;
-    float y = float(gl_FragCoord.y) + float(i) * 0.3;
-    c += sin(vec4(x, y, x * y, x + y));
-  }
-  outColor = c * 0.01;
+  /* Cheap but incompressible: the colour varies every pixel, so the attachment
+   * traffic cannot be folded away by PowerVR's frame-buffer compression. */
+  vec2 p = gl_FragCoord.xy;
+  outColor = vec4(fract(p.x * 0.017), fract(p.y * 0.013), fract((p.x + p.y) * 0.007), 1.0);
 }

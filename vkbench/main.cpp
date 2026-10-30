@@ -264,6 +264,10 @@ int main(int argc, char **argv) {
   VkAttachmentLoadOp lo = loadop(load_s);
   VkAttachmentStoreOp so = storeop(store_s);
   bool doDraw = !strcmp(draw_s, "on");
+  bool depthStore = false;
+  for (int i = 1; i + 1 < argc; i++) {
+    if (!strcmp(argv[i], "--depth-store")) depthStore = !strcmp(argv[i + 1], "on");
+  }
 
   auto make_image = [&](VkFormat fmt, VkImageUsageFlags usage, VkImage &img, VkDeviceMemory &mem) {
     VkImageCreateInfo ici{};
@@ -313,7 +317,7 @@ int main(int argc, char **argv) {
   atts[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; atts[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
   atts[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; atts[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   atts[1].format = depthFmt; atts[1].samples = VK_SAMPLE_COUNT_1_BIT;
-  atts[1].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; atts[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  atts[1].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; atts[1].storeOp = depthStore ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
   atts[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; atts[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
   atts[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; atts[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
@@ -357,7 +361,7 @@ int main(int argc, char **argv) {
   VkPipelineViewportStateCreateInfo vp{}; vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO; vp.viewportCount = 1; vp.pViewports = &viewport; vp.scissorCount = 1; vp.pScissors = &scissor;
   VkPipelineMultisampleStateCreateInfo ms{}; ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO; ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
   VkPipelineDepthStencilStateCreateInfo ds{}; ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-  ds.depthTestEnable = VK_TRUE; ds.depthWriteEnable = VK_TRUE; ds.depthCompareOp = VK_COMPARE_OP_LESS;
+  ds.depthTestEnable = VK_TRUE; ds.depthWriteEnable = VK_TRUE; ds.depthCompareOp = VK_COMPARE_OP_ALWAYS;
   VkPipelineRasterizationStateCreateInfo rs{}; rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
   rs.polygonMode = VK_POLYGON_MODE_FILL; rs.cullMode = VK_CULL_MODE_NONE; rs.frontFace = VK_FRONT_FACE_CLOCKWISE; rs.lineWidth = 1.0f;
   VkPipelineColorBlendAttachmentState cba{}; cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -449,23 +453,8 @@ int main(int argc, char **argv) {
          w, h, color_s, depth_s, load_s, store_s, draw_s, n, w * h / 1e6, bestTotal, bestTotal / n,
          bestTotal / (n * w * h / 1e6));
 
-  g_vkDestroyPipeline(device, pipeline, nullptr);
-  g_vkDestroyPipelineLayout(device, layout, nullptr);
-  g_vkDestroyShaderModule(device, fragSM, nullptr);
-  g_vkDestroyShaderModule(device, vertSM, nullptr);
-  g_vkDestroyFramebuffer(device, fb, nullptr);
-  g_vkDestroyRenderPass(device, renderPass, nullptr);
-  g_vkDestroyImageView(device, depthView, nullptr);
-  g_vkDestroyImageView(device, colorView, nullptr);
-  g_vkDestroyImage(device, depthImg, nullptr);
-  g_vkFreeMemory(device, depthMem, nullptr);
-  g_vkDestroyImage(device, colorImg, nullptr);
-  g_vkFreeMemory(device, colorMem, nullptr);
-  g_vkDestroyQueryPool(device, qp, nullptr);
-  g_vkDestroyCommandPool(device, pool, nullptr);
-  g_vkDestroyDevice(device, nullptr);
-  g_vkDestroyInstance(instance, nullptr);
-  dlclose(libvk);
-  fprintf(stderr, "TRACE normal exit 0\n"); fflush(stderr);
+  /* Deliberately no teardown: the PowerVR driver intermittently faults while destroying a
+   * standalone device from a shell process, and process exit reclaims everything anyway. */
+  fflush(stdout);
   return 0;
 }
