@@ -382,13 +382,14 @@ int main(int argc, char **argv) {
   VkQueryPool qp; g_vkCreateQueryPool(device, &qpci, nullptr, &qp);
 
   std::vector<double> passMs(n);
-  auto run_once = [&]() {
+  int idx = 0;
+  auto record = [&]() {
     VkCommandBufferBeginInfo cbbi{}; cbbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     cbbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     g_vkBeginCommandBuffer(cb, &cbbi);
     g_vkCmdResetQueryPool(cb, qp, 0, nTs);
     g_vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, 0);
-    int idx = 1;
+    idx = 1;
     for (int i = 0; i < n; i++) {
       g_vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, idx++);
       VkRenderPassBeginInfo rpbi{}; rpbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -409,7 +410,13 @@ int main(int argc, char **argv) {
     }
     g_vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, idx);
     g_vkEndCommandBuffer(cb);
+  };
+  /* Record once: a command buffer in the executable state cannot be re-recorded without a
+   * reset, and the earlier version re-began it on every iteration (invalid; crashed the
+   * PowerVR driver intermittently). Each submit re-executes the query reset inside it. */
+  record();
 
+  auto run_once = [&]() {
     VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1; si.pCommandBuffers = &cb;
     g_vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE);
