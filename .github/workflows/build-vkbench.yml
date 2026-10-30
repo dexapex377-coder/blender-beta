@@ -2,6 +2,11 @@ name: Build vkbench Android
 
 on:
   workflow_dispatch:
+  push:
+    branches: [beta-5.3]
+    paths:
+      - 'vkbench/**'
+      - '.github/workflows/build-vkbench.yml'
 
 jobs:
   build:
