@@ -28,6 +28,7 @@
 
 #define VK_PROC(name) static PFN_##name g_##name = nullptr;
 VK_PROC(vkGetInstanceProcAddr)
+VK_PROC(vkCreateInstance)
 VK_PROC(vkEnumerateInstanceExtensionProperties)
 VK_PROC(vkEnumeratePhysicalDevices)
 VK_PROC(vkGetPhysicalDeviceProperties)
@@ -155,6 +156,7 @@ int main(int argc, char **argv) {
   LOAD_LIB(vkGetInstanceProcAddr);
   g_vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)dlsym(libvk, "vkGetInstanceProcAddr");
 
+  g_vkCreateInstance = (PFN_vkCreateInstance)g_vkGetInstanceProcAddr(nullptr, "vkCreateInstance");
   g_vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)g_vkGetInstanceProcAddr(nullptr, "vkEnumeratePhysicalDevices");
   g_vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)g_vkGetInstanceProcAddr(nullptr, "vkGetPhysicalDeviceProperties");
   g_vkGetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)g_vkGetInstanceProcAddr(nullptr, "vkGetPhysicalDeviceQueueFamilyProperties");
@@ -182,7 +184,7 @@ int main(int argc, char **argv) {
     VkPhysicalDeviceProperties p{}; g_vkGetPhysicalDeviceProperties(gpus[i], &p);
     if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) { chosen = gpus[i]; props = p; break; }
   }
-  fprintf(stderr, "GPU: %s type=%d timestampPeriod=%u\n", props.deviceName, (int)props.deviceType, props.limits.timestampPeriod);
+  fprintf(stderr, "GPU: %s type=%d timestampPeriod=%.1f\n", props.deviceName, (int)props.deviceType, (double)props.limits.timestampPeriod);
   double tsPeriodMs = props.limits.timestampPeriod / 1e6;
 
   uint32_t qfCount = 0;
