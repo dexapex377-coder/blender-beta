@@ -31,7 +31,7 @@ jobs:
           $CC -O2 -o vkbench-android \
             vkbench/main.cpp \
             -I/usr/include/vulkan \
-            -ldl -lm -llog
+            -ldl -lm -llog -static-libstdc++
           readelf -h vkbench-android | head -5
 
       - name: Upload vkbench binary
