@@ -468,7 +468,10 @@ jobs:
       # object files are untouched and ninja still reuses them.
       - name: Force CMake to reconfigure
         run: |
-          touch CMakeLists.txt
+          # The Blender source is checked out under blender/, not at the repo root: touching
+          # the root CMakeLists.txt (which does not exist) never triggered the reconfigure and
+          # the restored build.ninja kept the stale OpenJPEG .so path.
+          touch blender/CMakeLists.txt
           echo "cmake will reconfigure on this run"
 
       - name: Configure CMake
@@ -501,6 +504,7 @@ jobs:
             -DBUILD_BASE=${{ github.workspace }}/blender \
             -C build_files/cmake/config/blender_release.cmake \
             -U "OPENJPEG.*" \
+            -DWITH_IMAGE_OPENJPEG=OFF \
             -DWITH_TBB_MALLOC_PROXY=OFF \
             -DWITH_TESTS=OFF \
             -DWITH_PYTHON_INSTALL=ON \
