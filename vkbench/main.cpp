@@ -273,7 +273,8 @@ int main(int argc, char **argv) {
     ici.extent = { (uint32_t)w, (uint32_t)h, 1 };
     ici.mipLevels = 1; ici.arrayLayers = 1; ici.samples = VK_SAMPLE_COUNT_1_BIT;
     ici.tiling = VK_IMAGE_TILING_OPTIMAL; ici.usage = usage;
-    if (g_vkCreateImage(device, &ici, nullptr, &img) != VK_SUCCESS) return false;
+    VkResult r1 = g_vkCreateImage(device, &ici, nullptr, &img);
+    if (r1 != VK_SUCCESS) { fprintf(stderr, "  vkCreateImage fmt=%d failed r=%d\n", (int)fmt, (int)r1); return false; }
     VkMemoryRequirements mr; g_vkGetImageMemoryRequirements(device, img, &mr);
     VkPhysicalDeviceMemoryProperties mp;
     g_vkGetPhysicalDeviceMemoryProperties(chosen, &mp);
@@ -284,7 +285,8 @@ int main(int argc, char **argv) {
     }
     VkMemoryAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     ai.allocationSize = mr.size; ai.memoryTypeIndex = memType;
-    if (g_vkAllocateMemory(device, &ai, nullptr, &mem) != VK_SUCCESS) return false;
+    VkResult r2 = g_vkAllocateMemory(device, &ai, nullptr, &mem);
+    if (r2 != VK_SUCCESS) { fprintf(stderr, "  vkAllocateMemory size=%llu type=%u failed r=%d\n", (unsigned long long)mr.size, memType, (int)r2); return false; }
     g_vkBindImageMemory(device, img, mem, 0);
     return true;
   };
@@ -301,6 +303,7 @@ int main(int argc, char **argv) {
   if (!make_image(depthFmt, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, depthImg, depthMem)) { fprintf(stderr, "depth image fail\n"); return 1; }
   if (!make_view(colorImg, colorFmt, VK_IMAGE_ASPECT_COLOR_BIT, colorView)) { fprintf(stderr, "color view fail\n"); return 1; }
   if (!make_view(depthImg, depthFmt, VK_IMAGE_ASPECT_DEPTH_BIT, depthView)) { fprintf(stderr, "depth view fail\n"); return 1; }
+  fprintf(stderr, "step: images ok\n");
 
   VkAttachmentDescription atts[2] = {};
   atts[0].format = colorFmt; atts[0].samples = VK_SAMPLE_COUNT_1_BIT;
@@ -417,6 +420,7 @@ int main(int argc, char **argv) {
     return total;
   };
 
+  fprintf(stderr, "step: results\n");
   double bestTotal = 1e18;
   for (int it = 0; it < iterations; it++) {
     double total = run_once();
