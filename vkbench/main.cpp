@@ -300,7 +300,7 @@ int main(int argc, char **argv) {
   VkImage colorImg, depthImg; VkDeviceMemory colorMem, depthMem;
   VkImageView colorView, depthView;
   fprintf(stderr, "TRACE before color\n"); fflush(stderr);
-  if (!make_image(colorFmt, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, colorImg, colorMem)) { fprintf(stderr, "TRACE COLOR FAILED\n"); fflush(stderr); _exit(42); }
+  if (!make_image(colorFmt, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, colorImg, colorMem)) { fprintf(stderr, "TRACE COLOR FAILED\n"); fflush(stderr); exit(42); }
   fprintf(stderr, "TRACE after color\n"); fflush(stderr);
   if (!make_image(depthFmt, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, depthImg, depthMem)) { fprintf(stderr, "depth image fail\n"); return 1; }
   if (!make_view(colorImg, colorFmt, VK_IMAGE_ASPECT_COLOR_BIT, colorView)) { fprintf(stderr, "color view fail\n"); return 1; }
