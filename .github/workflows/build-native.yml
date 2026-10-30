@@ -505,7 +505,6 @@ jobs:
             -C build_files/cmake/config/blender_release.cmake \
             -U "OPENJPEG.*" \
             -DHOST_PYTHON_EXECUTABLE="$(which python3.13)" \
-            -DWITH_IMAGE_OPENJPEG=OFF \
             -DWITH_TBB_MALLOC_PROXY=OFF \
             -DWITH_TESTS=OFF \
             -DWITH_PYTHON_INSTALL=ON \
