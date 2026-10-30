@@ -120,6 +120,7 @@ int main(int argc, char **argv) {
   int w = 1868, h = 882, n = 5, iterations = 1;
   const char *color_s = "r16f", *depth_s = "d32s8";
   const char *load_s = "load", *store_s = "store", *draw_s = "on";
+  bool depthStore = false;
 
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--w")) w = atoi(argv[++i]);
@@ -131,6 +132,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--storeop")) store_s = argv[++i];
     else if (!strcmp(argv[i], "--draw")) draw_s = argv[++i];
     else if (!strcmp(argv[i], "--iterations")) iterations = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--depth-store")) depthStore = !strcmp(argv[++i], "on");
     else { fprintf(stderr, "unknown arg %s\n", argv[i]); return 2; }
   }
 
@@ -264,10 +266,6 @@ int main(int argc, char **argv) {
   VkAttachmentLoadOp lo = loadop(load_s);
   VkAttachmentStoreOp so = storeop(store_s);
   bool doDraw = !strcmp(draw_s, "on");
-  bool depthStore = false;
-  for (int i = 1; i + 1 < argc; i++) {
-    if (!strcmp(argv[i], "--depth-store")) depthStore = !strcmp(argv[i + 1], "on");
-  }
 
   auto make_image = [&](VkFormat fmt, VkImageUsageFlags usage, VkImage &img, VkDeviceMemory &mem) {
     VkImageCreateInfo ici{};
