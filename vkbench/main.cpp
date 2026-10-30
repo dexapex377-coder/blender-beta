@@ -341,10 +341,10 @@ int main(int argc, char **argv) {
   VkPipelineRasterizationStateCreateInfo rs{}; rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
   rs.polygonMode = VK_POLYGON_MODE_FILL; rs.cullMode = VK_CULL_MODE_NONE; rs.frontFace = VK_FRONT_FACE_CLOCKWISE; rs.lineWidth = 1.0f;
   VkPipelineColorBlendAttachmentState cba{}; cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-  VkPipelineColorBlendStateCreateInfo cb{}; cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO; cb.attachmentCount = 1; cb.pAttachments = &cba;
+  VkPipelineColorBlendStateCreateInfo blend{}; blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO; blend.attachmentCount = 1; blend.pAttachments = &cba;
   VkGraphicsPipelineCreateInfo gpci{}; gpci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
   gpci.stageCount = 2; gpci.pStages = stages; gpci.pViewportState = &vp; gpci.pMultisampleState = &ms;
-  gpci.pDepthStencilState = &ds; gpci.pRasterizationState = &rs; gpci.pColorBlendState = &cb;
+  gpci.pDepthStencilState = &ds; gpci.pRasterizationState = &rs; gpci.pColorBlendState = &blend;
   gpci.layout = layout; gpci.renderPass = renderPass; gpci.subpass = 0;
   VkPipeline pipeline;
   if (g_vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gpci, nullptr, &pipeline) != VK_SUCCESS) { fprintf(stderr, "pipeline fail\n"); return 1; }
