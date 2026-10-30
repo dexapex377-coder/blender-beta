@@ -77,6 +77,10 @@ class GHOST_SystemAndroid : public GHOST_System {
   void handleTextInput(const char *utf8_string);
   void handleJavaKeyEvent(int32_t keycode, int32_t action, int32_t meta_state);
 
+  /** Press or release one modifier and leave it that way (toggle shortcuts). The latched bit
+   * survives motion events, whose meta state comes from Android and knows nothing about it. */
+  void setModifierLatched(int32_t keycode, bool pressed);
+
   /** A `.blend` the system asked us to open, forwarded from `onNewIntent`. Becomes a
    * #GHOST_kEventOpenMainFile, which the window manager answers with
    * `WM_OT_open_mainfile` -- the same path a file double-clicked in the Finder takes. */
@@ -106,6 +110,8 @@ class GHOST_SystemAndroid : public GHOST_System {
   /* Input state tracked from events for the out-of-queue queries. */
   GHOST_Buttons buttons_;
   int32_t meta_state_;
+  /* Modifiers held by a toggle shortcut, OR'ed into getModifierKeys(). */
+  int32_t latched_meta_;
   int32_t cursor_x_, cursor_y_;
 
   /* S Pen side button, tracked so it works while hovering or touching. */

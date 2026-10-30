@@ -123,6 +123,53 @@ inline bool overlay_extras_forced_off()
   return debug_prop_off("debug.blender.overlay_extras");
 }
 
+/** Opt-in switches. Unlike #debug_prop_off these are off when the property is absent: they turn on
+ * a non-default path.
+ *
+ * - `debug.blender.viewport_color 1`: Workbench viewport color target as RGBA8 (default RGBA16F).
+ * - `debug.blender.viewport_depth 1`: Workbench viewport depth target as D16 (default D32S8).
+ * - `debug.blender.vk_legacy 1`: the old C on-screen keyboard, ball and shortcut pie. Off by
+ *   default: the Kotlin ShortcutsOverlay is the supported keyboard now.
+ */
+inline bool debug_prop_on(const char *name)
+{
+#ifdef __ANDROID__
+  char value[PROP_VALUE_MAX] = {};
+  if (__system_property_get(name, value) > 0 && value[0] != '\0') {
+    return atoi(value) != 0;
+  }
+#else
+  (void)name;
+#endif
+  return false;
+}
+
+inline bool viewport_color_rgba8()
+{
+  return debug_prop_on("debug.blender.viewport_color");
+}
+
+/** 0 = default D32S8, 1 = D16. */
+inline int viewport_depth_choice()
+{
+#ifdef __ANDROID__
+  char value[PROP_VALUE_MAX] = {};
+  if (__system_property_get("debug.blender.viewport_depth", value) > 0 && value[0] != '\0') {
+    return atoi(value);
+  }
+#endif
+  return 0;
+}
+
+inline bool vk_legacy_enabled()
+{
+#ifdef __ANDROID__
+  return debug_prop_on("debug.blender.vk_legacy");
+#else
+  return true;
+#endif
+}
+
 using TimePoint = std::chrono::steady_clock::time_point;
 
 /** Rolling-average accumulator; one static instance per `PERF_ZONE` call site. */

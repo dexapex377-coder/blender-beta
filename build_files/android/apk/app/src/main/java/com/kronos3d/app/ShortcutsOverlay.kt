@@ -918,7 +918,10 @@ private fun ShortcutsPanel(
                                                 }
                                             } else {
                                                 /* A non-toggle shortcut must not inherit a
-                                                 * modifier left latched by another one. */
+                                                 * modifier left latched by another one: release
+                                                 * the native latch too, not just the panel state,
+                                                 * or the modifier stays down in Blender. */
+                                                latchedCombo.forEach { id -> onLatchModifier(id, false) }
                                                 latchedMeta.value = 0
                                                 latchedCombo = emptyList()
                                                 onSendCombo(item.combo)

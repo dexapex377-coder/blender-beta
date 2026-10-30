@@ -45,6 +45,7 @@
 #include "BLI_listbase.hh"
 #include "BLI_math_base_c.hh"
 #include "BLI_math_vector_c.hh"
+#include "BLI_perf_probe.hh"
 #include "BLI_rect.hh"
 #include "BLI_string.hh"
 #include "BLI_string_utf8.hh"
@@ -1134,6 +1135,9 @@ static void vk_status_text(const VirtualKeyboard &vk,
 
 static void vk_draw_cb(const wmWindow *win, void * /*customdata*/)
 {
+  if (!blender::perf::vk_legacy_enabled()) {
+    return;
+  }
   VirtualKeyboard &vk = g_vk;
   /* The ball, the pie and the shortcuts live here and are painted whether the keyboard is up or
    * not, so they get their own pass on the way in as well as on the way out. */
@@ -1496,6 +1500,9 @@ static void vk_open(wmWindowManager *wm, wmWindow *win)
 
 void WM_virtual_keyboard_text_edit_begin(const wmWindow *win, const char *const *string)
 {
+  if (!blender::perf::vk_legacy_enabled()) {
+    return;
+  }
   if (g_vk.open && g_vk.win == win) {
     g_vk.text_edit = string;
     vk_tag_redraw(g_vk.win);
@@ -1504,6 +1511,9 @@ void WM_virtual_keyboard_text_edit_begin(const wmWindow *win, const char *const 
 
 void WM_virtual_keyboard_text_edit_end(const wmWindow *win)
 {
+  if (!blender::perf::vk_legacy_enabled()) {
+    return;
+  }
   if (g_vk.text_edit != nullptr && g_vk.win == win) {
     g_vk.text_edit = nullptr;
     vk_tag_redraw(g_vk.win);
@@ -1512,6 +1522,9 @@ void WM_virtual_keyboard_text_edit_end(const wmWindow *win)
 
 bool WM_virtual_keyboard_is_open(const wmWindow *win)
 {
+  if (!blender::perf::vk_legacy_enabled()) {
+    return false;
+  }
   return g_vk.open && (win == nullptr || g_vk.win == win);
 }
 
@@ -1543,6 +1556,21 @@ void WM_virtual_keyboard_toggle(wmWindowManager *wm, wmWindow *win)
    * toggle would have left the ball sitting next to the timeline, still swallowing taps. */
   (void)wm;
   (void)win;
+  if (!blender::perf::vk_legacy_enabled()) {
+    /* Drop a ball callback left over from an earlier session/build, then stop. */
+    if (g_vk.draw_handle != nullptr && g_vk.win != nullptr) {
+      WM_draw_cb_exit(g_vk.win, g_vk.draw_handle);
+      g_vk.draw_handle = nullptr;
+    }
+    g_vk.open = false;
+    g_vk.overlay = VirtualKeyboard::Overlay::None;
+    g_vk.held_mask = 0;
+    g_vk.text_edit = nullptr;
+    g_vk.keys.clear();
+    g_vk.mods = 0;
+    g_vk.caps = false;
+    return;
+  }
   g_vk.open = false;
   g_vk.overlay = VirtualKeyboard::Overlay::None;
   g_vk.held_mask = 0;
@@ -3093,6 +3121,13 @@ bool wm_virtual_keyboard_ghost_event(wmWindowManager *wm,
                                      const int type,
                                      const void *customdata)
 {
+  /* The old C keyboard, its floating ball and its shortcut pie are off unless explicitly
+   * requested: the Kotlin ShortcutsOverlay owns that surface now. Registering the draw
+   * callback here on the first touch is what kept the ball alive even though the toggle was
+   * closed, so the guard has to be at the entry, not only in the toggle. */
+  if (!blender::perf::vk_legacy_enabled()) {
+    return false;
+  }
   VirtualKeyboard &vk = g_vk;
   if (vk.open) {
     /* An open keyboard belongs to the window that opened it. */
@@ -3392,6 +3427,9 @@ bool wm_virtual_keyboard_ghost_event(wmWindowManager *wm,
 
 static wmOperatorStatus wm_virtual_keyboard_toggle_exec(bContext *C, wmOperator * /*op*/)
 {
+  if (!blender::perf::vk_legacy_enabled()) {
+    return OPERATOR_CANCELLED;
+  }
   wmWindow *win = CTX_wm_window(C);
   if (win == nullptr) {
     return OPERATOR_CANCELLED;

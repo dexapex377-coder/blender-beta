@@ -413,8 +413,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_kronos3d_app_BlenderActivity_nativeSe
   if (!system || modifier_keycode == 0) {
     return;
   }
-  system->handleJavaKeyEvent(modifier_keycode,
-                            pressed ? AKEY_EVENT_ACTION_DOWN : AKEY_EVENT_ACTION_UP,
-                            pressed ? meta_state : 0);
+  (void)meta_state;
+  system->setModifierLatched(modifier_keycode, pressed);
 }
 

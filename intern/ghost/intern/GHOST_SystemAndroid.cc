@@ -56,6 +56,7 @@ GHOST_SystemAndroid::GHOST_SystemAndroid()
     : app_(g_android_app),
       window_(nullptr),
       meta_state_(0),
+      latched_meta_(0),
       cursor_x_(0),
       cursor_y_(0),
       stylus_button_down_(false),
@@ -245,6 +246,10 @@ void GHOST_SystemAndroid::handleWindowFocus(bool gained)
    * which widget was pressed -- and this overwrote exactly that, handing the press the position
    * the finger had already reached. Dragging an editor border was impossible as a result: by the
    * time the press existed it was tens of pixels away from the border it was aimed at. */
+  if (!gained) {
+    /* A latched modifier must not survive leaving the app: nothing would be left to release it. */
+    latched_meta_ = 0;
+  }
   pushEvent(std::make_unique<GHOST_Event>(
       getMilliSeconds(),
       gained ? GHOST_kEventWindowActivate : GHOST_kEventWindowDeactivate,
@@ -915,6 +920,56 @@ void GHOST_SystemAndroid::handleJavaKeyEvent(int32_t keycode, int32_t action, in
   java_keys_.push_back({keycode, action, meta_state});
 }
 
+void GHOST_SystemAndroid::setModifierLatched(int32_t keycode, bool pressed)
+{
+  int32_t bit = 0;
+  switch (keycode) {
+    case AKEYCODE_SHIFT_LEFT:
+    case AKEYCODE_SHIFT_RIGHT:
+      bit = AMETA_SHIFT_ON;
+      break;
+    case AKEYCODE_CTRL_LEFT:
+    case AKEYCODE_CTRL_RIGHT:
+      bit = AMETA_CTRL_ON;
+      break;
+    case AKEYCODE_ALT_LEFT:
+    case AKEYCODE_ALT_RIGHT:
+      bit = AMETA_ALT_ON;
+      break;
+    case AKEYCODE_META_LEFT:
+    case AKEYCODE_META_RIGHT:
+      bit = AMETA_META_ON;
+      break;
+    default:
+      return;
+  }
+
+  if (pressed) {
+    latched_meta_ |= bit;
+  }
+  else {
+    latched_meta_ &= ~bit;
+  }
+  /* Keep the instantaneous state in step for the paths that read it directly, and push the key
+   * event so Blender's keymap sees the modifier transition rather than only a meta bit. */
+  if (pressed) {
+    meta_state_ |= bit;
+  }
+  else {
+    meta_state_ &= ~bit;
+  }
+
+  const GHOST_TKey key = convertAndroidKey(keycode);
+  if (key == GHOST_kKeyUnknown || !window_) {
+    return;
+  }
+  pushEvent(std::make_unique<GHOST_EventKey>(getMilliSeconds(),
+                                             pressed ? GHOST_kEventKeyDown : GHOST_kEventKeyUp,
+                                             window_,
+                                             key,
+                                             false));
+}
+
 void GHOST_SystemAndroid::handleOpenMainFile(const char *path)
 {
   if (!path || !path[0]) {
@@ -1010,10 +1065,11 @@ void GHOST_SystemAndroid::dispatchJavaKeyEvent(int32_t keycode, int32_t action, 
 
 GHOST_TSuccess GHOST_SystemAndroid::getModifierKeys(GHOST_ModifierKeys &keys) const
 {
-  const bool shift = (meta_state_ & AMETA_SHIFT_ON) != 0;
-  const bool ctrl = (meta_state_ & AMETA_CTRL_ON) != 0;
-  const bool alt = (meta_state_ & AMETA_ALT_ON) != 0;
-  const bool os = (meta_state_ & AMETA_META_ON) != 0;
+  const int32_t state = meta_state_ | latched_meta_;
+  const bool shift = (state & AMETA_SHIFT_ON) != 0;
+  const bool ctrl = (state & AMETA_CTRL_ON) != 0;
+  const bool alt = (state & AMETA_ALT_ON) != 0;
+  const bool os = (state & AMETA_META_ON) != 0;
   keys.set(GHOST_kModifierKeyLeftShift, shift);
   keys.set(GHOST_kModifierKeyRightShift, shift);
   keys.set(GHOST_kModifierKeyLeftControl, ctrl);
