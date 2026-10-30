@@ -155,13 +155,9 @@ int main(int argc, char **argv) {
 
   LOAD_LIB(vkGetInstanceProcAddr);
   g_vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)dlsym(libvk, "vkGetInstanceProcAddr");
-
   g_vkCreateInstance = (PFN_vkCreateInstance)g_vkGetInstanceProcAddr(nullptr, "vkCreateInstance");
-  g_vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)g_vkGetInstanceProcAddr(nullptr, "vkEnumeratePhysicalDevices");
-  g_vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)g_vkGetInstanceProcAddr(nullptr, "vkGetPhysicalDeviceProperties");
-  g_vkGetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)g_vkGetInstanceProcAddr(nullptr, "vkGetPhysicalDeviceQueueFamilyProperties");
-  g_vkCreateDevice = (PFN_vkCreateDevice)g_vkGetInstanceProcAddr(nullptr, "vkCreateDevice");
-  g_vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)g_vkGetInstanceProcAddr(nullptr, "vkGetDeviceProcAddr");
+  if (!g_vkCreateInstance) { fprintf(stderr, "no vkCreateInstance\n"); return 1; }
+  fprintf(stderr, "step: loader ok\n");
 
   VkApplicationInfo appInfo{};
   appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -172,6 +168,21 @@ int main(int argc, char **argv) {
   ci.pApplicationInfo = &appInfo;
   VkInstance instance = VK_NULL_HANDLE;
   if (g_vkCreateInstance(&ci, nullptr, &instance) != VK_SUCCESS) { fprintf(stderr, "vkCreateInstance failed\n"); return 1; }
+  fprintf(stderr, "step: instance ok\n");
+
+  /* Instance-level entry points must be fetched with the instance, not NULL. */
+  g_vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)g_vkGetInstanceProcAddr(instance, "vkEnumeratePhysicalDevices");
+  g_vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)g_vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceProperties");
+  g_vkGetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)g_vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceQueueFamilyProperties");
+  g_vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)g_vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceMemoryProperties");
+  g_vkCreateDevice = (PFN_vkCreateDevice)g_vkGetInstanceProcAddr(instance, "vkCreateDevice");
+  g_vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)g_vkGetInstanceProcAddr(instance, "vkGetDeviceProcAddr");
+  if (!g_vkEnumeratePhysicalDevices || !g_vkGetPhysicalDeviceProperties ||
+      !g_vkGetPhysicalDeviceQueueFamilyProperties || !g_vkGetPhysicalDeviceMemoryProperties ||
+      !g_vkCreateDevice || !g_vkGetDeviceProcAddr) {
+    fprintf(stderr, "missing instance entry point\n"); return 1;
+  }
+  fprintf(stderr, "step: instance procs ok\n");
 
   uint32_t gpuCount = 0;
   g_vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr);
@@ -203,6 +214,7 @@ int main(int argc, char **argv) {
   dci.queueCreateInfoCount = 1; dci.pQueueCreateInfos = &dqci;
   VkDevice device = VK_NULL_HANDLE;
   if (g_vkCreateDevice(chosen, &dci, nullptr, &device) != VK_SUCCESS) { fprintf(stderr, "vkCreateDevice failed\n"); return 1; }
+  fprintf(stderr, "step: device ok\n");
 
   LOAD_DEV(vkGetDeviceQueue, device);
   LOAD_DEV(vkCreateImage, device);
@@ -245,6 +257,7 @@ int main(int argc, char **argv) {
 
   VkQueue queue;
   g_vkGetDeviceQueue(device, qf, 0, &queue);
+  fprintf(stderr, "step: device procs ok\n");
 
   VkFormat colorFmt = fmt_color(color_s);
   VkFormat depthFmt = fmt_depth(depth_s);
@@ -350,6 +363,7 @@ int main(int argc, char **argv) {
   gpci.layout = layout; gpci.renderPass = renderPass; gpci.subpass = 0;
   VkPipeline pipeline;
   if (g_vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gpci, nullptr, &pipeline) != VK_SUCCESS) { fprintf(stderr, "pipeline fail\n"); return 1; }
+  fprintf(stderr, "step: pipeline ok\n");
 
   VkCommandPoolCreateInfo cpci{}; cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO; cpci.queueFamilyIndex = qf;
   VkCommandPool pool; g_vkCreateCommandPool(device, &cpci, nullptr, &pool);
