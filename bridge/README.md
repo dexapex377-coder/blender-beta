@@ -26,7 +26,12 @@ El módulo se recarga en cada dispatch. Cambiarlo no requiere rebuild de
 | `event:<nombre>:<json>` | emite un evento arbitrario |
 | `file.new` / `file.open:<path>` | archivo |
 | `workspace.set:<name>` | cambia workspace |
+| `mode.set:<MODE>` | cambia modo (`EDIT`, `OBJECT`, `SCULPT`…) |
 | `tool.set:<idname>` | tool con override de `VIEW_3D` |
+| `tool.activate:<idname>` | activa tool y emite `tool_settings` |
+| `tool.gizmo:<id>:<prop>[\|json]` | lee/escribe prop del gizmo del tool |
+| `tool.opprop:<id>:<prop>[\|json]` | lee/escribe prop del operador del tool |
+| `tool.exec:<op>[\|json]` | ejecuta el operador del tool |
 | `op:<idname>[\|json]@AREA` | operador con kwargs y contexto de editor |
 | `set:<path>\|<json>[@AREA]` | escribe una propiedad RNA |
 | `get:<path>` | lee una propiedad RNA y emite `get_result` |
@@ -50,6 +55,22 @@ b("get:bpy.context.object.name")
 b("subscribe")
 b("ui.hide")
 ```
+
+## Caso concreto: tool Extrude
+
+El tool es `builtin.extrude_region`, su operador es
+`view3d.edit_mesh_extrude_move_normal` y su ajuste es `axis_type`
+(`NORMAL` / `XYZ`) del gizmo `VIEW3D_GGT_xform_extrude`.
+
+```kotlin
+b("mode.set:EDIT")
+b("tool.activate:builtin.extrude_region")
+b("tool.gizmo:VIEW3D_GGT_xform_extrude:axis_type|\"XYZ\"")
+b("tool.exec:view3d.edit_mesh_extrude_move_normal|{\"release_confirm\":true}")
+```
+
+Compose lee `tool_settings` / `tool_setting` desde `events.jsonl`: son las
+mismas props del tool nativo, aunque la UI de Blender esté oculta.
 
 ## Eventos (Blender -> Kotlin)
 
