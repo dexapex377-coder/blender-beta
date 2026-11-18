@@ -21,7 +21,11 @@ El módulo se recarga en cada dispatch. Cambiarlo no requiere rebuild de
 | `ping` | emite `pong` |
 | `bridge.reload` | recarga el módulo |
 | `state` | emite snapshot: workspace, area, mode, tool, objeto activo, selección |
-| `actions` | emite catálogo para construir menús en Compose |
+| `actions` | emite catálogo base para construir menús en Compose |
+| `menu.tree` | emite la lista de **todos** los menús detectados |
+| `menu:<id>` | emite los items de un menú/submenú con sus comandos |
+| `menu.open:<id>` | fallback: abre el menú nativo |
+| `mesh.subdivide[:<n>]` | subdivide en Edit Mode (`number_cuts`) |
 | `subscribe` | emite `state` cuando cambia selección/modo/workspace/tool |
 | `event:<nombre>:<json>` | emite un evento arbitrario |
 | `file.new` / `file.open:<path>` | archivo |
@@ -55,6 +59,34 @@ b("get:bpy.context.object.name")
 b("subscribe")
 b("ui.hide")
 ```
+
+## Caso concreto: Subdivide y menús/submenús
+
+Los menús son clases Python cuyo `draw()` llama a
+`layout.operator("mesh.subdivide")` o `layout.menu("OTRO_MENU")`. El bridge
+parsea `scripts/startup/bl_ui/*.py` y devuelve el árbol real:
+
+```kotlin
+b("menu.tree")                       // evento menu_tree
+b("menu:VIEW3D_MT_edit_mesh_edges")  // evento menu_items con sus items
+```
+
+Cada item trae:
+
+```json
+{"type":"operator","id":"mesh.subdivide","label":"Subdivide",
+ "command":"op:bpy.ops.mesh.subdivide@VIEW_3D"}
+```
+
+Al tocar Subdivide en tu menú Compose:
+
+```kotlin
+b("mode.set:EDIT")
+b("mesh.subdivide:2")
+```
+
+No llamás al menú: llamás **al operador que el menú llama**. Igual para
+cualquier menú/submenú, tool o panel.
 
 ## Caso concreto: tool Extrude
 
