@@ -13,7 +13,10 @@
 /* Allow using deprecated functionality for .blend file I/O. */
 #define DNA_DEPRECATED_ALLOW
 
+#include <cstddef>
+#include <cstdio>
 #include <cstring>
+#include <string>
 
 #include "DNA_ID_enums.h"
 #include "DNA_layer_types.h"
@@ -629,8 +632,53 @@ void WM_main_entry(bContext *C)
   wm_event_do_refresh_wm_and_depsgraph(C);
 }
 
+#ifdef WITH_GHOST_ANDROID
+static std::string blender_bridge_py_quote(const char *value)
+{
+  std::string result = "'";
+  for (const char *p = value; p != nullptr && *p != '\0'; ++p) {
+    const char c = *p;
+    if (c == '\\' || c == '\'') {
+      result += '\\';
+    }
+    result += c;
+  }
+  result += "'";
+  return result;
+}
+#endif
+
 void WM_main_loop_body(bContext *C)
 {
+#ifdef WITH_GHOST_ANDROID
+  /* Generic UI bridge. Commands arrive from the Android UI thread via JNI and
+   * must run here, on Blender's main thread, with a valid bContext. */
+  {
+    extern "C" bool blenderTakeBridgeCommand(char *buffer, size_t buffer_size);
+    extern "C" const char *blenderBridgeScriptsPath(void);
+
+    char command[4096];
+    while (blenderTakeBridgeCommand(command, sizeof(command))) {
+#  ifdef WITH_PYTHON
+      const std::string scripts_path = blenderBridgeScriptsPath();
+      std::string py = "import sys, importlib\n";
+      py += "p = " + blender_bridge_py_quote(scripts_path.c_str()) + "\n";
+      py += "if p not in sys.path: sys.path.insert(0, p)\n";
+      py += "import obl_bridge\n";
+      py += "importlib.reload(obl_bridge)\n";
+      py += "obl_bridge.handle(" + blender_bridge_py_quote(command) + ")\n";
+      fprintf(stderr, "[OBL.BRIDGE] dispatch: %s\n", command);
+      fflush(stderr);
+      const char *imports[] = {"bpy", nullptr};
+      BPY_run_string_exec(C, imports, py.c_str());
+#  else
+      fprintf(stderr, "[OBL.BRIDGE] dropped (no Python): %s\n", command);
+      fflush(stderr);
+#  endif
+    }
+  }
+#endif
+
   /* Get events from ghost, handle window events, add to window queues. */
   wm_window_events_process(C);
 

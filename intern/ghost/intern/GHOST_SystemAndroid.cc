@@ -31,11 +31,21 @@
 #include <android/native_window.h>
 #include <android_native_app_glue.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <ctime>
+#include <deque>
+#include <mutex>
+#include <string>
+#include <utility>
 
 static android_app *g_android_app = nullptr;
+
+/* Generic UI bridge queue. JNI enqueues from the Android UI thread; the drain
+ * happens on Blender's main thread in WM_main_loop_body(). */
+static std::mutex g_bridge_mutex;
+static std::deque<std::string> g_bridge_queue;
 
 /* Hold a finger this long without moving to get a right-click. */
 static constexpr uint64_t TOUCH_LONG_PRESS_MS = 500;
@@ -98,6 +108,51 @@ void GHOST_SystemAndroid::setAndroidApp(android_app *app)
 android_app *GHOST_SystemAndroid::getAndroidApp()
 {
   return g_android_app;
+}
+
+extern "C" void blenderQueueBridgeCommand(const char *command)
+{
+  if (command == nullptr || command[0] == '\0') {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(g_bridge_mutex);
+  g_bridge_queue.push_back(std::string(command));
+}
+
+extern "C" bool blenderTakeBridgeCommand(char *buffer, size_t buffer_size)
+{
+  if (buffer == nullptr || buffer_size == 0) {
+    return false;
+  }
+  std::string command;
+  {
+    std::lock_guard<std::mutex> lock(g_bridge_mutex);
+    if (g_bridge_queue.empty()) {
+      return false;
+    }
+    command = std::move(g_bridge_queue.front());
+    g_bridge_queue.pop_front();
+  }
+  const size_t copy_size = std::min(command.size() + 1, buffer_size);
+  memcpy(buffer, command.c_str(), copy_size);
+  buffer[copy_size - 1] = '\0';
+  return true;
+}
+
+extern "C" const char *blenderBridgeScriptsPath(void)
+{
+  static std::string path;
+  if (path.empty()) {
+    const char *external = (g_android_app && g_android_app->activity) ?
+                               g_android_app->activity->externalDataPath :
+                               nullptr;
+    path = (external != nullptr) ? external : "/sdcard/Android/data/com.kronos3d.app/files";
+    if (!path.empty() && path.back() != '/') {
+      path += '/';
+    }
+    path += "obl/";
+  }
+  return path.c_str();
 }
 
 GHOST_TSuccess GHOST_SystemAndroid::init()

@@ -12,6 +12,7 @@
 #include "GHOST_Buttons.hh"
 #include "GHOST_System.hh"
 
+#include <cstddef>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -185,3 +186,13 @@ class GHOST_SystemAndroid : public GHOST_System {
   std::vector<JavaKeyEvent> java_keys_;
   std::vector<std::string> java_open_files_;
 };
+
+/* Generic Kotlin/Compose -> Blender bridge.
+ * JNI calls queue a command from the Android UI thread; blenderTakeBridgeCommand()
+ * hands it to WM_main_loop_body(), which runs on Blender's main thread with a
+ * valid bContext. Implemented in GHOST_SystemAndroid.cc. */
+extern "C" {
+void blenderQueueBridgeCommand(const char *command);
+bool blenderTakeBridgeCommand(char *buffer, size_t buffer_size);
+const char *blenderBridgeScriptsPath(void);
+}

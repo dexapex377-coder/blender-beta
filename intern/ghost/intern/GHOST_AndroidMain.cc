@@ -267,6 +267,21 @@ extern "C" JNIEXPORT void JNICALL Java_com_kronos3d_app_BlenderActivity_nativeOp
   env->ReleaseStringUTFChars(path, utf);
 }
 
+/* Generic Kotlin/Compose command bridge. Queues on the Android UI thread;
+ * WM_main_loop_body() drains it on Blender's main thread. */
+extern "C" JNIEXPORT void JNICALL Java_com_kronos3d_app_BlenderActivity_nativeDispatch(
+    JNIEnv *env, jobject /*thiz*/, jstring command)
+{
+  if (command == nullptr) {
+    return;
+  }
+  const char *utf = env->GetStringUTFChars(command, nullptr);
+  fprintf(stderr, "[OBL.BRIDGE] JNI queued: %s\n", utf);
+  fflush(stderr);
+  blenderQueueBridgeCommand(utf);
+  env->ReleaseStringUTFChars(command, utf);
+}
+
 extern "C" void android_main(struct android_app *app)
 {
   /* Claim Blender's "main thread" here, before anything else runs.

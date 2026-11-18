@@ -76,9 +76,30 @@ public class BlenderActivity extends NativeActivity {
 
   private InputView inputView;
 
+  /* Set in onCreate so Compose overlays can dispatch without holding an Activity. */
+  private static BlenderActivity sInstance = null;
+
   private native void nativeOnCommitText(String text);
   private native void nativeOnKey(int keycode, int action, int metaState);
   private native void nativeOpenMainFile(String path);
+
+  /** Generic UI bridge: one JNI entry point for every Compose action. */
+  private native void nativeDispatch(String command);
+
+  /** Send a command from Compose/Java. Native queues it; the Blender loop executes it. */
+  public void dispatchBridge(String command) {
+    if (command != null) {
+      nativeDispatch(command);
+    }
+  }
+
+  /** Static variant for callers that only have a Context. */
+  public static void dispatchBridgeStatic(String command) {
+    if (sInstance != null && command != null) {
+      sInstance.nativeDispatch(command);
+    }
+  }
+
   /**
    * Sends several modifiers plus one key as a real GHOST key sequence.
    *
@@ -224,6 +245,7 @@ public class BlenderActivity extends NativeActivity {
     /* Also before super.onCreate(): the glue reads this while building argv. */
     publishLaunchFile(getIntent());
     super.onCreate(state);
+    sInstance = this;
     enterImmersive();
     requestAllFilesAccess();
 
