@@ -583,6 +583,44 @@ public class BlenderActivity extends NativeActivity {
        * loaded in the static initializer), so this only affects what comes
        * after: the extension system's subprocesses. */
       Os.setenv("LD_LIBRARY_PATH", getApplicationInfo().nativeLibraryDir, true);
+
+      /* The cross-compiled OpenSSL has its CA directory baked to a path on the
+       * build machine. Point both the embedded interpreter and any extension
+       * subprocess at the certifi bundle that ships in the Python payload.
+       * bpy_interface.cc only writes SSL_CERT_FILE when it is empty, so setting
+       * it here is safe even once PYTHON_SSL_CERT_FILE is defined in native. */
+      File caFile = new File(pythonHome,
+          "lib/python" + PYTHON_VERSION + "/site-packages/certifi/cacert.pem");
+      if (caFile.isFile()) {
+        Os.setenv("SSL_CERT_FILE", caFile.getAbsolutePath(), true);
+
+        /* This build's libcrypto ignores SSL_CERT_FILE on its own: the bundle
+         * is found but load_default_certs() still ends up with an empty trust
+         * store (see build_certifi() in build_files/android/deps/build.sh).
+         * The official fix is a sitecustomize.py installed by build_certifi(),
+         * which the CI does not run because it reuses precompiled libs. Write
+         * the equivalent here so both the embedded interpreter and the
+         * extension subprocesses load the CA bundle explicitly at startup. */
+        File sitePackages = caFile.getParentFile();
+        writeText(new File(sitePackages, "sitecustomize.py"),
+            "import os\n"
+                + "_cert = os.environ.get('SSL_CERT_FILE', '')\n"
+                + "if _cert and os.path.isfile(_cert):\n"
+                + "    try:\n"
+                + "        import ssl as _ssl\n"
+                + "        _orig = _ssl.SSLContext.load_default_certs\n"
+                + "        def _load_default_certs(self, purpose=_ssl.Purpose.SERVER_AUTH):\n"
+                + "            try:\n"
+                + "                self.load_verify_locations(cafile=_cert)\n"
+                + "            except Exception:\n"
+                + "                _orig(self, purpose)\n"
+                + "        _ssl.SSLContext.load_default_certs = _load_default_certs\n"
+                + "    except Exception:\n"
+                + "        pass\n");
+      }
+      else {
+        Log.w(TAG, "certifi cacert.pem missing; HTTPS extension sync may fail");
+      }
     }
     catch (Exception ex) {
       /* Not fatal: everything except online extensions works without it. */

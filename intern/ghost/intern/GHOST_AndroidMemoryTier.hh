@@ -42,25 +42,35 @@ inline bool GHOST_android_is_low_memory_device()
   return is_low_memory;
 }
 
-/** Divisor applied to the native window size. 1 = native, 2 = half resolution.
+/**
+ * Divisor applied to the native window size. 1 = native, 1.5 = 66.7% linear, 2 = half resolution.
+ * Fractional values are allowed (e.g. 1.5) for a middle-ground between sharpness and render cost.
  *
- * The default is native resolution, which is what kronos3D does; a phone that really cannot
- * afford full-resolution targets is a per-device problem, so it is a property rather than a
- * guess made from the RAM size. `setprop debug.blender.renderdiv 2` halves it (4 is the
- * maximum), 0 disables the request and leaves the default. */
-inline uint32_t GHOST_android_render_scale_divisor()
+ * Priority: `debug.blender.renderdiv` system property (for testing) overrides the value set by
+ * Blender's Preferences ("System" -> Android Render Scale). The preference starts at 1.0 (native).
+ */
+inline float &GHOST_android_render_scale_divisor_ref()
 {
-  static const uint32_t divisor = []() -> uint32_t {
+  static float divisor = 1.5f;
+  return divisor;
+}
+
+inline float GHOST_android_render_scale_divisor()
+{
+  static const float sysprop = []() -> float {
     char value[PROP_VALUE_MAX] = {};
     if (__system_property_get("debug.blender.renderdiv", value) > 0 && value[0] != '\0') {
-      const int v = atoi(value);
-      if (v >= 1 && v <= 4) {
-        return uint32_t(v);
+      const float v = atof(value);
+      if (v >= 1.0f && v <= 4.0f) {
+        return v;
       }
     }
-    return 1;
+    return 0.0f;
   }();
-  return divisor;
+  if (sysprop > 0.0f) {
+    return sysprop;
+  }
+  return GHOST_android_render_scale_divisor_ref();
 }
 
 /** Whether a one finger drag reports as a pan instead of a left button drag.
@@ -124,8 +134,8 @@ inline uint32_t GHOST_android_ui_dpi()
  */
 inline float ghost_android_scale_input(float value)
 {
-  const uint32_t divisor = GHOST_android_render_scale_divisor();
-  return divisor > 1 ? value / float(divisor) : value;
+  const float divisor = GHOST_android_render_scale_divisor();
+  return divisor > 1.0f ? value / divisor : value;
 }
 
 #endif /* __ANDROID__ */

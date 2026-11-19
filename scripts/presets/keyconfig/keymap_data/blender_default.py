@@ -1304,7 +1304,11 @@ def km_property_editor(_params):
         ("buttons.start_filter", {"type": 'F', "value": 'PRESS', "ctrl": True}, None),
         ("buttons.clear_filter", {"type": 'F', "value": 'PRESS', "alt": True}, None),
         # Modifier panels
-        ("object.modifier_set_active", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
+        # Touch: CLICK rather than PRESS. This item matches anywhere inside a
+        # modifier panel, its widgets included; a press consumed here makes the
+        # window manager drop the pending click, so widgets that defer to
+        # KM_CLICK (the drop-down/chevron, display-mode toggles) never fire.
+        ("object.modifier_set_active", {"type": 'LEFTMOUSE', "value": 'CLICK'}, None),
         ("object.modifier_remove", {"type": 'X', "value": 'PRESS'}, {"properties": [("report", True)]}),
         ("object.modifier_remove", {"type": 'DEL', "value": 'PRESS'}, {"properties": [("report", True)]}),
         ("object.modifier_copy", {"type": 'D', "value": 'PRESS', "shift": True}, None),
@@ -1322,7 +1326,7 @@ def km_property_editor(_params):
         # Strip modifiers
         ("sequencer.strip_modifier_duplicate", {"type": 'D', "value": 'PRESS', "shift": True}, None),
         ("sequencer.add_strip_modifier_menu", {"type": 'A', "value": 'PRESS', "shift": True}, None),
-        ("sequencer.strip_modifier_set_active", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
+        ("sequencer.strip_modifier_set_active", {"type": 'LEFTMOUSE', "value": 'CLICK'}, None),
         # Scene Compositor Effects
         ("scene.set_active_compositor_effect", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
         ("scene.remove_compositor_effect", {"type": 'X', "value": 'PRESS'}, None),

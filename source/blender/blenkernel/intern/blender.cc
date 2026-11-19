@@ -448,6 +448,7 @@ void BKE_blender_userdef_app_template_data_swap(UserDef *userdef_a, UserDef *use
             USER_SAVE_PROMPT | USER_SPLASH_DISABLE | USER_SHOW_GIZMO_NAVIGATE);
 
   DATA_SWAP(ui_scale);
+  DATA_SWAP(android_render_scale);
 
 #undef VALUE_SWAP
 #undef DATA_SWAP

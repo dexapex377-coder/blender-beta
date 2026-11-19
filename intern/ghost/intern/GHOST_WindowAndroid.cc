@@ -29,8 +29,8 @@
  */
 static void ghost_android_apply_render_scale(ANativeWindow *native_window)
 {
-  const uint32_t divisor = GHOST_android_render_scale_divisor();
-  if (native_window == nullptr || divisor <= 1) {
+  const float divisor = GHOST_android_render_scale_divisor();
+  if (native_window == nullptr || divisor <= 1.0f) {
     return;
   }
   const int32_t native_w = ANativeWindow_getWidth(native_window);
@@ -38,13 +38,13 @@ static void ghost_android_apply_render_scale(ANativeWindow *native_window)
   if (native_w <= 0 || native_h <= 0) {
     return;
   }
-  const int32_t w = std::max(1, native_w / int32_t(divisor));
-  const int32_t h = std::max(1, native_h / int32_t(divisor));
+  const int32_t w = std::max(1, int32_t(native_w / divisor));
+  const int32_t h = std::max(1, int32_t(native_h / divisor));
   /* Format 0 keeps the window's current pixel format. */
   ANativeWindow_setBuffersGeometry(native_window, w, h, 0);
   __android_log_print(ANDROID_LOG_INFO,
                       "blender-renderscale",
-                      "native=%dx%d -> buffers=%dx%d (divisor=%u)",
+                      "native=%dx%d -> buffers=%dx%d (divisor=%.2f)",
                       native_w,
                       native_h,
                       w,
@@ -192,9 +192,9 @@ void GHOST_WindowAndroid::getClientBounds(GHOST_Rect &bounds) const
 {
   /* ANativeWindow_getWidth/Height report the display size, not the (possibly reduced)
    * buffer size, so apply the same divisor used for the buffer geometry. */
-  const uint32_t divisor = GHOST_android_render_scale_divisor();
-  const int32_t w = native_window_ ? ANativeWindow_getWidth(native_window_) / int32_t(divisor) : 0;
-  const int32_t h = native_window_ ? ANativeWindow_getHeight(native_window_) / int32_t(divisor) :
+  const float divisor = GHOST_android_render_scale_divisor();
+  const int32_t w = native_window_ ? int32_t(ANativeWindow_getWidth(native_window_) / divisor) : 0;
+  const int32_t h = native_window_ ? int32_t(ANativeWindow_getHeight(native_window_) / divisor) :
                                      0;
   bounds.set(0, 0, w, h);
 }

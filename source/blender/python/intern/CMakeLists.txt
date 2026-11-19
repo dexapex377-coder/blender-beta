@@ -165,7 +165,16 @@ endif()
 # Without this, the absolute path on the builder is used, causing HTTPS access to fail.
 # For example `urllib.request.urlopen("https://projects.blender.org")` fails
 # (or any other HTTPS site). see: #102300 for details.
-if(WITH_PYTHON AND WITH_PYTHON_INSTALL AND WITH_INSTALL_PORTABLE)
+# NOTE: that this isn't necessary on WIN32.
+#
+# Android ships its own portable Python payload, extracted from the APK at
+# runtime, instead of going through Blender's install step, so WITH_PYTHON_INSTALL
+# is off there while the bundle is every bit as portable. It needs this more than
+# any desktop build does: the OpenSSL it links was cross-compiled, so its built-in
+# certificate directory points at a path on the build machine that cannot exist
+# on a phone.
+if(WITH_PYTHON AND (NOT WIN32) AND
+   ((WITH_PYTHON_INSTALL AND (APPLE OR WITH_INSTALL_PORTABLE)) OR ANDROID))
   # - `PYTHON_SSL_CERT_FILE` absolute path to the PEM file.
   find_python_module_file("certifi/cacert.pem" PYTHON_SSL_CERT_FILE _python_ssl_cert_file_relative)
   mark_as_advanced(PYTHON_SSL_CERT_FILE)

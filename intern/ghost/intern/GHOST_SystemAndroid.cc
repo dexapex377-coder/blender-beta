@@ -42,6 +42,14 @@
 
 static android_app *g_android_app = nullptr;
 
+/* Set from Blender's user preferences (UserDef::android_render_scale), see
+ * GHOST_AndroidMemoryTier.hh. C linkage so the WindowManager can declare and
+ * call it across the GHOST/WM boundary (wm_window.cc) by unmangled name. */
+extern "C" void GHOST_android_set_render_scale_divisor(float divisor)
+{
+  GHOST_android_render_scale_divisor_ref() = divisor > 0.0f ? divisor : 1.0f;
+}
+
 /* Generic UI bridge queue. JNI enqueues from the Android UI thread; the drain
  * happens on Blender's main thread in WM_main_loop_body(). */
 static std::mutex g_bridge_mutex;
@@ -192,9 +200,9 @@ void GHOST_SystemAndroid::getMainDisplayDimensions(uint32_t &width, uint32_t &he
 {
   if (app_ && app_->window) {
     /* Report the size Blender renders at, which the render scale may have reduced. */
-    const uint32_t divisor = GHOST_android_render_scale_divisor();
-    width = uint32_t(ANativeWindow_getWidth(app_->window)) / divisor;
-    height = uint32_t(ANativeWindow_getHeight(app_->window)) / divisor;
+    const float divisor = GHOST_android_render_scale_divisor();
+    width = uint32_t(ANativeWindow_getWidth(app_->window) / divisor);
+    height = uint32_t(ANativeWindow_getHeight(app_->window) / divisor);
   }
   else {
     width = height = 0;
@@ -1258,8 +1266,11 @@ uint16_t GHOST_SystemAndroid::getDPIHint()
 {
   /* Blender's desktop workspace needs substantially more logical room than a mobile UI. Do not
    * pass Android's 450-DPI phone density through directly; use the Android Blender profile. */
-  const uint32_t divisor = GHOST_android_render_scale_divisor();
-  return uint16_t(std::max(96u, GHOST_android_ui_dpi() / divisor));
+  const float divisor = GHOST_android_render_scale_divisor();
+  /* Truncating the divisor to int made 1.5 behave exactly like 1.0, so the UI
+   * stayed large and got cropped when the reduced framebuffer was scaled back
+   * up. Divide by the real float value to keep the on-screen UI size stable. */
+  return uint16_t(std::max(96u, uint32_t(GHOST_android_ui_dpi() / divisor)));
 }
 
 /* Call a no-arg void method on the BlenderActivity instance. */

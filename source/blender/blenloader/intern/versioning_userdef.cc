@@ -1826,6 +1826,15 @@ void blo_do_versions_userdef(UserDef *userdef)
     }
   }
 
+  if (!USER_VERSION_ATLEAST(503, 30)) {
+    /* Android render scale divisor was added with a 1.5 (2/3 resolution) default
+     * on phones. Old preferences have the bytes zeroed, so give them the new
+     * default instead of showing 0 in the UI and rendering at native size. */
+    if (userdef->android_render_scale < 1.0f) {
+      userdef->android_render_scale = 1.5f;
+    }
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a USER_VERSION_ATLEAST check.

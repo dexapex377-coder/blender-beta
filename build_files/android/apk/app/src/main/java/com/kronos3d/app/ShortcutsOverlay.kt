@@ -147,8 +147,20 @@ object ShortcutsOverlay {
                 onTypeText = { text -> activity.commitText(text) },
                 onBackspace = { activity.sendDeleteKey() },
                 onLatchModifier = { id, pressed ->
-                    KEY_TABLE[id]?.takeIf { it.meta != 0 }?.let {
-                        activity.setModifierLatched(it.keyCode, pressed)
+                    /* Modifiers live in KEY_TABLE as meta bits with keyCode 0, and the native
+                     * setModifierLatched() guard drops keycode 0. Map the id to a real Android
+                     * keycode here so a latched Shift actually reaches Blender's keymap. */
+                    val code = when (id) {
+                        "shift_l" -> KeyEvent.KEYCODE_SHIFT_LEFT
+                        "shift_r" -> KeyEvent.KEYCODE_SHIFT_RIGHT
+                        "ctrl_l" -> KeyEvent.KEYCODE_CTRL_LEFT
+                        "ctrl_r" -> KeyEvent.KEYCODE_CTRL_RIGHT
+                        "alt_l" -> KeyEvent.KEYCODE_ALT_LEFT
+                        "alt_r" -> KeyEvent.KEYCODE_ALT_RIGHT
+                        else -> 0
+                    }
+                    if (code != 0) {
+                        activity.setModifierLatched(code, pressed)
                     }
                 },
             )
