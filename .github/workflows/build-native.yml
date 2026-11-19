@@ -118,6 +118,9 @@ jobs:
         if: steps.cache-libs-android.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
+          # cache/restore can leave a partial directory without reporting a
+          # cache hit; a clone into a non-empty path then fails with exit 128.
+          rm -rf blender/lib/android_arm64
           git clone --depth 1 https://projects.blender.org/blender/lib-android_arm64.git blender/lib/android_arm64
           cd blender/lib/android_arm64
           git lfs install
@@ -127,6 +130,7 @@ jobs:
         if: steps.cache-libs-x64.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
+          rm -rf blender/lib/linux_x64
           git clone --depth 1 https://projects.blender.org/blender/lib-linux_x64.git blender/lib/linux_x64
           cd blender/lib/linux_x64
           git lfs install
