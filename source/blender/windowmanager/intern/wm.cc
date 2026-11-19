@@ -648,15 +648,19 @@ static std::string blender_bridge_py_quote(const char *value)
 }
 #endif
 
+#ifdef WITH_GHOST_ANDROID
+/* Generic UI bridge, defined in GHOST_SystemAndroid.cc with C linkage.
+ * Declare at namespace scope: `extern "C"` is not allowed inside a function. */
+extern "C" bool blenderTakeBridgeCommand(char *buffer, size_t buffer_size);
+extern "C" const char *blenderBridgeScriptsPath(void);
+#endif
+
 void WM_main_loop_body(bContext *C)
 {
 #ifdef WITH_GHOST_ANDROID
   /* Generic UI bridge. Commands arrive from the Android UI thread via JNI and
    * must run here, on Blender's main thread, with a valid bContext. */
   {
-    extern "C" bool blenderTakeBridgeCommand(char *buffer, size_t buffer_size);
-    extern "C" const char *blenderBridgeScriptsPath(void);
-
     char command[4096];
     while (blenderTakeBridgeCommand(command, sizeof(command))) {
 #  ifdef WITH_PYTHON
