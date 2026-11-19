@@ -115,26 +115,42 @@ jobs:
           key: libs-x64-${{ steps.libs-commit.outputs.x64 }}
 
       - name: Clone precompiled libs (Android ARM64 — target build)
-        if: steps.cache-libs-android.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
-          # cache/restore can leave a partial directory without reporting a
-          # cache hit; a clone into a non-empty path then fails with exit 128.
-          rm -rf blender/lib/android_arm64
-          git clone --depth 1 https://projects.blender.org/blender/lib-android_arm64.git blender/lib/android_arm64
-          cd blender/lib/android_arm64
-          git lfs install
-          git lfs pull
+          # cache/restore@v4 can extract the tree without setting cache-hit,
+          # so use whatever is there instead of cloning into a non-empty path.
+          # If it really is missing, retry: projects.blender.org intermittently
+          # answers 403 to the runner.
+          if [ -d blender/lib/android_arm64/.git ]; then
+            echo "Android libs already present (cache restore)"
+          else
+            rm -rf blender/lib/android_arm64
+            for attempt in 1 2 3; do
+              git clone --depth 1 https://projects.blender.org/blender/lib-android_arm64.git blender/lib/android_arm64 && break
+              echo "clone attempt $attempt failed; retrying in 15s" >&2
+              rm -rf blender/lib/android_arm64
+              sleep 15
+            done
+            [ -d blender/lib/android_arm64/.git ] || { echo "ERROR: Android libs clone failed"; exit 1; }
+            ( cd blender/lib/android_arm64 && git lfs install && git lfs pull )
+          fi
 
       - name: Clone precompiled libs (Linux x64 — host_tools)
-        if: steps.cache-libs-x64.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
-          rm -rf blender/lib/linux_x64
-          git clone --depth 1 https://projects.blender.org/blender/lib-linux_x64.git blender/lib/linux_x64
-          cd blender/lib/linux_x64
-          git lfs install
-          git lfs pull
+          if [ -d blender/lib/linux_x64/.git ]; then
+            echo "Linux libs already present (cache restore)"
+          else
+            rm -rf blender/lib/linux_x64
+            for attempt in 1 2 3; do
+              git clone --depth 1 https://projects.blender.org/blender/lib-linux_x64.git blender/lib/linux_x64 && break
+              echo "clone attempt $attempt failed; retrying in 15s" >&2
+              rm -rf blender/lib/linux_x64
+              sleep 15
+            done
+            [ -d blender/lib/linux_x64/.git ] || { echo "ERROR: Linux libs clone failed"; exit 1; }
+            ( cd blender/lib/linux_x64 && git lfs install && git lfs pull )
+          fi
 
       - uses: actions/cache/save@v4
         if: steps.cache-libs-android.outputs.cache-hit != 'true'
