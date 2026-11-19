@@ -1344,6 +1344,8 @@ struct UserDef {
    * Fractional values are allowed. Debug override: `setprop debug.blender.renderdiv 1.5`.
    */
   float android_render_scale = 1.5f;
+  /* Keep UserDef_Runtime 8-byte aligned on both 32 and 64 bit DNA. */
+  char _pad19[4] = {};
 
   /** Runtime data (keep last). */
   UserDef_Runtime runtime;
